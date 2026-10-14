@@ -12,7 +12,7 @@ android {
     val localProperties = java.util.Properties().apply {
         val file = rootProject.file("local.properties")
         if (file.exists()) {
-            file.inputStream().use { load(it) }
+            file.inputStream().use { input -> this.load(input) }
         }
     }
     val mapsKey = (localProperties.getProperty("MAPS_API_KEY")
