@@ -32,27 +32,49 @@ class GolemioRepositoryImpl(
         } else 0
 
         if (labSettings.golemioApiKey.isNotBlank()) {
-            val response = try {
-                apiService.getDepartureBoards(
-                    apiKey = labSettings.golemioApiKey,
-                    stopNames = listOf(stopQuery.trim().ifBlank { "Anděl" })
-                )
-            } catch (e: HttpException) {
-                throw GolemioApiException(
-                    when (e.code()) {
-                        401, 403 -> "Neplatný API klíč Golemio (HTTP ${e.code()})."
-                        404 -> "Zastávka „${stopQuery.trim()}“ nebyla nalezena. Zadejte přesný název dle PID."
-                        429 -> "Překročen limit požadavků Golemio API, zkuste to za chvíli."
-                        else -> "Chyba Golemio API (HTTP ${e.code()})."
-                    },
-                    e
-                )
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: IOException) {
-                throw GolemioApiException("Nelze se připojit ke Golemio API: ${e.message ?: "chyba sítě"}", e)
-            } catch (e: Exception) {
-                throw GolemioApiException("Nepodařilo se zpracovat odpověď Golemio API: ${e.message}", e)
+            val candidateStops = resolveStopQueries(stopQuery.trim().ifBlank { "Anděl" })
+            var response: PidDepartureBoardResponseDto? = null
+            var lastError: Throwable? = null
+
+            for (candidate in candidateStops) {
+                try {
+                    val res = apiService.getDepartureBoards(
+                        apiKey = labSettings.golemioApiKey,
+                        stopNames = listOf(candidate)
+                    )
+                    if (res.departures.isNotEmpty() || res.stops.isNotEmpty()) {
+                        response = res
+                        break
+                    }
+                } catch (e: HttpException) {
+                    lastError = e
+                    if (e.code() != 404) {
+                        throw GolemioApiException(
+                            when (e.code()) {
+                                401, 403 -> "Neplatný API klíč Golemio (HTTP ${e.code()})."
+                                429 -> "Překročen limit požadavků Golemio API, zkuste to za chvíli."
+                                else -> "Chyba Golemio API (HTTP ${e.code()})."
+                            },
+                            e
+                        )
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: IOException) {
+                    throw GolemioApiException("Nelze se připojit ke Golemio API: ${e.message ?: "chyba sítě"}", e)
+                } catch (e: Exception) {
+                    lastError = e
+                }
+            }
+
+            if (response == null) {
+                val isRegional = candidateStops.any { it.contains("Boleslav") }
+                val errorMsg = if (isRegional) {
+                    "Zastávka „${stopQuery.trim()}“ nebyla v PID nalezena. V Mladé Boleslavi zkuste zadat „Mladá Boleslav, aut.st.“ nebo „Mladá Boleslav, žel.st.“."
+                } else {
+                    "Zastávka „${stopQuery.trim()}“ nebyla v PID nalezena. Zadejte přesný název zastávky."
+                }
+                throw GolemioApiException(errorMsg, lastError)
             }
 
             val stopsById = response.stops.associateBy { it.stopId }
@@ -96,16 +118,33 @@ class GolemioRepositoryImpl(
 
         // Demo data – used only when no Golemio API key is configured.
         val cleanStop = stopQuery.ifBlank { "Anděl" }
-        val baseLines = listOf(
-            Triple("191", "Letiště Václava Havla", "B"),
-            Triple("167", "Nemocnice Na Homolce", "A"),
-            Triple("125", "Smíchovské nádraží → Skalka", "C"),
-            Triple("9", "Spojovací", "1"),
-            Triple("191", "Letiště Václava Havla (Následující spoj)", "B"),
-            Triple("20", "Dědina", "2")
-        )
+        val isMb = cleanStop.contains("boleslav", ignoreCase = true) || cleanStop.contains("mlad", ignoreCase = true)
+
+        val baseLines = if (isMb) {
+            listOf(
+                Triple("412", "Praha, Černý Most (Expres)", "1"),
+                Triple("467", "Mělník, žel.st.", "3"),
+                Triple("715", "Bělá pod Bezdězem, nám.", "4"),
+                Triple("720", "Mnichovo Hradiště, nám.", "2"),
+                Triple("412", "Praha, Černý Most", "1"),
+                Triple("722", "Dolní Bousov, nám.", "5")
+            )
+        } else {
+            listOf(
+                Triple("191", "Letiště Václava Havla", "B"),
+                Triple("167", "Nemocnice Na Homolce", "A"),
+                Triple("125", "Smíchovské nádraží → Skalka", "C"),
+                Triple("9", "Spojovací", "1"),
+                Triple("191", "Letiště Václava Havla (Následující spoj)", "B"),
+                Triple("20", "Dědina", "2")
+            )
+        }
+
         val offsetsSeconds = listOf(18L, 75L, 190L, 310L, 480L, 640L)
         val delaysSeconds = listOf(12, 45, 0, 95, 15, 0)
+        val stopLat = if (isMb) 50.4114 else 50.0715
+        val stopLon = if (isMb) 14.9032 else 14.4035
+        val displayStopName = if (isMb && !cleanStop.contains(",")) "Mladá Boleslav, aut.st." else cleanStop
 
         return baseLines.mapIndexed { idx, (line, headsign, platform) ->
             val schedMs = nowMs + (offsetsSeconds[idx] * 1000L) - (delaysSeconds[idx] * 1000L)
@@ -115,10 +154,10 @@ class GolemioRepositoryImpl(
                 routeShortName = line,
                 routeType = if (line.length <= 2) 0 else 3,
                 headsign = headsign,
-                stopName = cleanStop,
+                stopName = displayStopName,
                 platformCode = platform,
-                stopLat = 50.0715,
-                stopLon = 14.4035,
+                stopLat = stopLat,
+                stopLon = stopLon,
                 scheduledDepartureEpochMs = schedMs,
                 predictedDepartureEpochMs = predMs,
                 scheduledArrivalDestinationEpochMs = schedMs + (14 * 60_000L),
@@ -398,6 +437,42 @@ class GolemioRepositoryImpl(
                 speedKmh = 52.0,
                 lastUpdatedEpochMs = nowMs,
                 isFromRawInputGateway = labSettings.rawInputGatewayStream
+            ),
+            LiveVehicleMarker(
+                tripId = "412_BUS_MB1",
+                routeShortName = "412",
+                headsign = "Praha, Černý Most",
+                lat = 50.4114 + sin(tSec * 0.03) * 0.005,
+                lon = 14.9032 + cos(tSec * 0.03) * 0.007,
+                bearing = 210f,
+                delaySeconds = 15,
+                speedKmh = 54.0,
+                lastUpdatedEpochMs = nowMs - 12_000L,
+                isFromRawInputGateway = labSettings.rawInputGatewayStream
+            ),
+            LiveVehicleMarker(
+                tripId = "715_BUS_MB2",
+                routeShortName = "715",
+                headsign = "Bělá pod Bezdězem, nám.",
+                lat = 50.4220 + cos(tSec * 0.02) * 0.004,
+                lon = 14.9150 + sin(tSec * 0.02) * 0.006,
+                bearing = 340f,
+                delaySeconds = 40,
+                speedKmh = 42.0,
+                lastUpdatedEpochMs = nowMs,
+                isFromRawInputGateway = labSettings.rawInputGatewayStream
+            ),
+            LiveVehicleMarker(
+                tripId = "467_BUS_MB3",
+                routeShortName = "467",
+                headsign = "Mělník, žel.st.",
+                lat = 50.4060 + sin(tSec * 0.025) * 0.004,
+                lon = 14.8960 + cos(tSec * 0.025) * 0.005,
+                bearing = 250f,
+                delaySeconds = 0,
+                speedKmh = 48.0,
+                lastUpdatedEpochMs = nowMs - 18_000L,
+                isFromRawInputGateway = labSettings.rawInputGatewayStream
             )
         )
 
@@ -501,5 +576,28 @@ class GolemioRepositoryImpl(
             cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2).pow(2)
         val c = 2 * atan2(sqrt(a), sqrt(1 - a))
         return (r * c).roundToInt()
+    }
+
+    private fun resolveStopQueries(input: String): List<String> {
+        val clean = input.trim()
+        val normalized = java.text.Normalizer.normalize(clean, java.text.Normalizer.Form.NFD)
+            .replace("\\p{InCombiningDiacriticalMarks}+".toRegex(), "")
+            .lowercase()
+
+        return when {
+            clean.contains(",") -> listOf(clean)
+            normalized.contains("boleslav") || normalized.contains("mlad") || normalized == "mb" -> listOf(
+                "Mladá Boleslav, aut.st.",
+                "Mladá Boleslav, žel.st.",
+                "Mladá Boleslav, nám.Republiky",
+                "Mladá Boleslav, Václava Klementa",
+                clean
+            )
+            normalized == "cerny most" || normalized == "cernak" -> listOf("Černý Most", clean)
+            normalized == "hlavni nadrazi" || normalized == "hlavak" -> listOf("Hlavní nádraží", clean)
+            normalized == "smichovske nadrazi" || normalized == "smichov" -> listOf("Smíchovské nádraží", clean)
+            normalized == "andel" -> listOf("Anděl", clean)
+            else -> listOf(clean, "$clean, aut.st.", "$clean, žel.st.", "$clean, náměstí")
+        }
     }
 }

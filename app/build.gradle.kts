@@ -9,6 +9,17 @@ android {
     namespace = "cz.pid.golemiocompanion"
     compileSdk = 35
 
+    val localProperties = java.util.Properties().apply {
+        val file = rootProject.file("local.properties")
+        if (file.exists()) {
+            file.inputStream().use { load(it) }
+        }
+    }
+    val mapsKey = (localProperties.getProperty("MAPS_API_KEY")
+        ?: (project.findProperty("MAPS_API_KEY") as? String)
+        ?: System.getenv("MAPS_API_KEY")
+        ?: "").trim()
+
     defaultConfig {
         applicationId = "cz.pid.golemiocompanion"
         minSdk = 26
@@ -23,6 +34,9 @@ android {
 
         buildConfigField("String", "GOLEMIO_BASE_URL", "\"https://api.golemio.cz/\"")
         buildConfigField("String", "PID_IG_BASE_URL", "\"https://api.golemio.cz/pid/input-gateway/\"")
+        buildConfigField("String", "MAPS_API_KEY", "\"$mapsKey\"")
+
+        manifestPlaceholders["mapsApiKey"] = mapsKey
     }
 
     buildTypes {

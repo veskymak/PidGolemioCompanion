@@ -105,7 +105,7 @@ fun TripDashboardScreen(
                     OutlinedTextField(
                         value = uiState.stopSearchQuery,
                         onValueChange = viewModel::onStopQueryChanged,
-                        label = { Text("Zastávka PID (např. Anděl)", color = Color.White.copy(alpha = 0.7f)) },
+                        label = { Text("Zastávka PID (např. Mladá Boleslav)", color = Color.White.copy(alpha = 0.7f)) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
@@ -141,6 +141,80 @@ fun TripDashboardScreen(
                             contentDescription = "Vyhledat odjezdy",
                             tint = Color.White
                         )
+                    }
+                }
+
+                // Rychlý výběr oblíbených a mimopražských uzlů (Mladá Boleslav atd.)
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    val presets = listOf(
+                        "Mladá Boleslav, aut.st." to "🚌 MB aut.st.",
+                        "Mladá Boleslav, žel.st." to "🚆 MB žel.st.",
+                        "Černý Most" to "🚌 Černý Most",
+                        "Anděl" to "📍 Anděl",
+                        "Hlavní nádraží" to "🚆 Praha hl.n.",
+                        "Dejvická" to "📍 Dejvická"
+                    )
+                    items(presets) { (query, label) ->
+                        val isSelected = uiState.stopSearchQuery.equals(query, ignoreCase = true)
+                        Surface(
+                            color = if (isSelected) Color(0xFF2563EB) else Color.White.copy(alpha = 0.12f),
+                            shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.clickable {
+                                viewModel.onStopQueryChanged(query)
+                                viewModel.refreshStopData()
+                            }
+                        ) {
+                            Text(
+                                text = label,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Dynamický našeptávač zastávek pro Mladou Boleslav
+                val queryNorm = uiState.stopSearchQuery.lowercase()
+                if (queryNorm.contains("boles") || queryNorm.contains("mlad") || queryNorm == "mb") {
+                    val mbStops = listOf(
+                        "Mladá Boleslav, aut.st.",
+                        "Mladá Boleslav, žel.st.",
+                        "Mladá Boleslav, nám.Republiky",
+                        "Mladá Boleslav, Václava Klementa",
+                        "Mladá Boleslav, U Sportu",
+                        "Mladá Boleslav, Kosmonosy"
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "Zastávky v Mladé Boleslavi:",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(mbStops) { stopName ->
+                                Surface(
+                                    color = Color(0xFF0369A1).copy(alpha = 0.4f),
+                                    shape = MaterialTheme.shapes.extraSmall,
+                                    modifier = Modifier.clickable {
+                                        viewModel.onStopQueryChanged(stopName)
+                                        viewModel.refreshStopData()
+                                    }
+                                ) {
+                                    Text(
+                                        text = stopName.substringAfter(", "),
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

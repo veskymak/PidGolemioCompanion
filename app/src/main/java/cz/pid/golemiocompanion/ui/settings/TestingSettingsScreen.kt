@@ -72,6 +72,54 @@ fun TestingSettingsScreen(
             }
         }
 
+        item(key = "google_maps_api_section") {
+            val isConfigured = cz.pid.golemiocompanion.BuildConfig.MAPS_API_KEY.isNotBlank() &&
+                !cz.pid.golemiocompanion.BuildConfig.MAPS_API_KEY.contains("YOUR_GOOGLE_MAPS_API_KEY")
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .liquidGlass(
+                        cornerRadius = 22.dp,
+                        tintColor = if (isConfigured) Color(0xFF10B981) else Color(0xFFF59E0B)
+                    )
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Google Maps API (Živá mapa)",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Surface(
+                        color = if (isConfigured) Color(0xFF10B981).copy(alpha = 0.25f) else Color(0xFFF59E0B).copy(alpha = 0.25f),
+                        shape = MaterialTheme.shapes.extraSmall
+                    ) {
+                        Text(
+                            text = if (isConfigured) "AKTIVNÍ" else "NEZADÁNO",
+                            color = if (isConfigured) Color(0xFF4ADE80) else Color(0xFFFBBF24),
+                            fontWeight = FontWeight.Black,
+                            fontSize = 10.sp,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Pro zobrazení mapových podkladů Google Maps vložte svůj klíč z Google Cloud Console do souboru local.properties v kořeni projektu:\nMAPS_API_KEY=AIzaSy...\n\nPokud klíč nemáte, na obrazovce Živá mapa jednoduše přepněte na tlačítko „120Hz Radar“, který vykresluje všechny autobusy v reálném čase plynule i bez Google API.",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp
+                )
+            }
+        }
+
         item(key = "lab_warning_badge") {
             Row(
                 modifier = Modifier

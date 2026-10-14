@@ -27,7 +27,7 @@ interface GolemioApiService {
         @Header("X-Access-Token") apiKey: String,
         @Query("routeShortName") routeShortName: String? = null,
         @Query("includeNotTracking") includeNotTracking: Boolean = false,
-        @Query("limit") limit: Int = 100
+        @Query("limit") limit: Int = 2500
     ): VehiclePositionsGeoJsonDto
 
     @GET("pid/input-gateway/v1/vehiclepositions/raw")

@@ -1,6 +1,7 @@
 package cz.pid.golemiocompanion.ui.map
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -19,12 +20,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
 import com.google.maps.android.compose.*
+import cz.pid.golemiocompanion.BuildConfig
 import cz.pid.golemiocompanion.domain.model.LiveVehicleMarker
 import cz.pid.golemiocompanion.ui.components.liquidGlass
 import cz.pid.golemiocompanion.ui.trip.TripViewModel
+import kotlinx.coroutines.launch
 
 @Composable
 fun LiveMapScreen(
@@ -33,10 +39,17 @@ fun LiveMapScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var useTacticalRadarCanvas by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     val pragueCenter = remember { LatLng(50.0755, 14.4178) }
+    val mbCenter = remember { LatLng(50.4114, 14.9032) }
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(pragueCenter, 12.5f)
+    }
+
+    val isMapsKeyConfigured = remember {
+        BuildConfig.MAPS_API_KEY.isNotBlank() &&
+            !BuildConfig.MAPS_API_KEY.contains("YOUR_GOOGLE_MAPS_API_KEY")
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -47,14 +60,20 @@ fun LiveMapScreen(
                 uiSettings = MapUiSettings(zoomControlsEnabled = false)
             ) {
                 uiState.liveVehicles.forEach { vehicle ->
+                    val markerHue = when {
+                        vehicle.delaySeconds <= 30 -> BitmapDescriptorFactory.HUE_AZURE
+                        vehicle.delaySeconds <= 120 -> BitmapDescriptorFactory.HUE_YELLOW
+                        else -> BitmapDescriptorFactory.HUE_RED
+                    }
                     Marker(
                         state = MarkerState(position = LatLng(vehicle.lat, vehicle.lon)),
                         title = "Linka ${vehicle.routeShortName} → ${vehicle.headsign}",
                         snippet = buildString {
-                            append("Zpoždění: ${vehicle.delaySeconds}s • ${vehicle.speedKmh.toInt()} km/h")
-                            if (vehicle.isDeadReckoningEstimated) append(" [DEAD RECKONING ODHAD]")
-                            if (vehicle.isFromRawInputGateway) append(" [RAW GATEWAY]")
+                            append("Zpoždění: ${vehicle.delaySeconds} s • ${vehicle.speedKmh.toInt()} km/h")
+                            if (vehicle.isDeadReckoningEstimated) append(" [DEAD RECKONING]")
+                            if (vehicle.isFromRawInputGateway) append(" [RAW STREAM]")
                         },
+                        icon = BitmapDescriptorFactory.defaultMarker(markerHue),
                         rotation = vehicle.bearing
                     )
                 }
@@ -64,7 +83,8 @@ fun LiveMapScreen(
                         Marker(
                             state = MarkerState(position = LatLng(pr.lat, pr.lon)),
                             title = pr.name,
-                            snippet = "Volná místa: ${pr.freePlaces} / ${pr.totalPlaces}"
+                            snippet = "Volná místa: ${pr.freePlaces} / ${pr.totalPlaces}",
+                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE)
                         )
                     }
                 }
@@ -74,13 +94,15 @@ fun LiveMapScreen(
                         Marker(
                             state = MarkerState(position = LatLng(bike.lat, bike.lon)),
                             title = "${bike.provider}: ${bike.name}",
-                            snippet = "Volných kol: ${bike.freeBikes}"
+                            snippet = "Volných kol: ${bike.freeBikes}",
+                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_MAGENTA)
                         )
                     }
                 }
             }
         } else {
-            InteractivePragueTelemetryRadar(
+            DynamicTelemetryRadar(
+                centerTarget = cameraPositionState.position.target,
                 vehicles = uiState.liveVehicles,
                 showParkings = uiState.showParkingsLayer,
                 parkings = uiState.parkingsPR,
@@ -89,65 +111,160 @@ fun LiveMapScreen(
             )
         }
 
+        // Horní ovládací a filtrační panel
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .padding(16.dp)
-                .liquidGlass(cornerRadius = 24.dp)
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .liquidGlass(cornerRadius = 24.dp)
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                OutlinedTextField(
-                    value = uiState.mapLineFilter,
-                    onValueChange = viewModel::onMapLineFilterChanged,
-                    label = { Text("Filtrovat linku (např. 191)", color = Color.White.copy(alpha = 0.75f)) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF38BDF8),
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
-                    ),
-                    modifier = Modifier.weight(1f)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = uiState.mapLineFilter,
+                        onValueChange = viewModel::onMapLineFilterChanged,
+                        label = { Text("Filtrovat linku (např. 412, 191)", color = Color.White.copy(alpha = 0.75f)) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF38BDF8),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
 
-                FilterChip(
-                    selected = useTacticalRadarCanvas,
-                    onClick = { useTacticalRadarCanvas = !useTacticalRadarCanvas },
-                    label = { Text(if (useTacticalRadarCanvas) "Google Mapa" else "120Hz Radar") }
-                )
+                    FilterChip(
+                        selected = useTacticalRadarCanvas,
+                        onClick = { useTacticalRadarCanvas = !useTacticalRadarCanvas },
+                        label = { Text(if (useTacticalRadarCanvas) "Google Mapa" else "120Hz Radar") }
+                    )
+                }
+
+                // Rychlé skoky: Praha vs. Mladá Boleslav vs. Vycentrovat všechna vozidla
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SuggestionChip(
+                        onClick = {
+                            scope.launch {
+                                cameraPositionState.animate(
+                                    CameraUpdateFactory.newLatLngZoom(pragueCenter, 12.5f)
+                                )
+                            }
+                        },
+                        label = { Text("📍 Praha", color = Color.White, fontSize = 11.sp) }
+                    )
+
+                    SuggestionChip(
+                        onClick = {
+                            scope.launch {
+                                cameraPositionState.animate(
+                                    CameraUpdateFactory.newLatLngZoom(mbCenter, 13.5f)
+                                )
+                            }
+                        },
+                        label = { Text("🚌 Mladá Boleslav", color = Color.White, fontSize = 11.sp) }
+                    )
+
+                    if (uiState.liveVehicles.isNotEmpty()) {
+                        SuggestionChip(
+                            onClick = {
+                                val lats = uiState.liveVehicles.map { it.lat }
+                                val lons = uiState.liveVehicles.map { it.lon }
+                                val minLat = lats.minOrNull() ?: 50.0
+                                val maxLat = lats.maxOrNull() ?: 50.5
+                                val minLon = lons.minOrNull() ?: 14.0
+                                val maxLon = lons.maxOrNull() ?: 15.0
+                                val bounds = LatLngBounds(
+                                    LatLng(minLat, minLon),
+                                    LatLng(maxLat, maxLon)
+                                )
+                                scope.launch {
+                                    runCatching {
+                                        cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 120))
+                                    }
+                                }
+                            },
+                            label = { Text("🔍 Vozidla (${uiState.liveVehicles.size})", color = Color(0xFF38BDF8), fontSize = 11.sp) }
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = uiState.showParkingsLayer,
+                        onClick = viewModel::toggleParkingsLayer,
+                        leadingIcon = {
+                            Icon(Icons.Default.LocalParking, contentDescription = null, modifier = Modifier.size(16.dp))
+                        },
+                        label = { Text("P+R (${uiState.parkingsPR.size})") }
+                    )
+
+                    FilterChip(
+                        selected = uiState.showBikesLayer,
+                        onClick = viewModel::toggleBikesLayer,
+                        leadingIcon = {
+                            Icon(Icons.Default.PedalBike, contentDescription = null, modifier = Modifier.size(16.dp))
+                        },
+                        label = { Text("Sdílená kola (${uiState.mapSharedBikes.sumOf { it.freeBikes }})") }
+                    )
+                }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChip(
-                    selected = uiState.showParkingsLayer,
-                    onClick = viewModel::toggleParkingsLayer,
-                    leadingIcon = {
-                        Icon(Icons.Default.LocalParking, contentDescription = null, modifier = Modifier.size(16.dp))
-                    },
-                    label = { Text("P+R (${uiState.parkingsPR.size})") }
-                )
-
-                FilterChip(
-                    selected = uiState.showBikesLayer,
-                    onClick = viewModel::toggleBikesLayer,
-                    leadingIcon = {
-                        Icon(Icons.Default.PedalBike, contentDescription = null, modifier = Modifier.size(16.dp))
-                    },
-                    label = { Text("Sdílená kola (${uiState.mapSharedBikes.sumOf { it.freeBikes }})") }
-                )
+            // Upozornění, pokud není zadán Google Maps API klíč
+            if (!isMapsKeyConfigured && !useTacticalRadarCanvas) {
+                Surface(
+                    color = Color(0xDD0F172A),
+                    shape = MaterialTheme.shapes.medium,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Google Maps API klíč není nakonfigurován",
+                                color = Color(0xFFFDE68A),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                text = "Pro zobrazení dlaždic vložte klíč do local.properties (MAPS_API_KEY) nebo přepněte na Radar.",
+                                color = Color.White.copy(alpha = 0.75f),
+                                fontSize = 11.sp
+                            )
+                        }
+                        TextButton(
+                            onClick = { useTacticalRadarCanvas = true },
+                            colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF38BDF8))
+                        ) {
+                            Text("Radar", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
         }
 
+        // Spodní horizontální lišta s detaily vozidel
         LazyRow(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -157,14 +274,26 @@ fun LiveMapScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(uiState.liveVehicles, key = { it.tripId }) { vehicle ->
-                VehicleTelemetryCard(vehicle = vehicle)
+                VehicleTelemetryCard(
+                    vehicle = vehicle,
+                    onSelect = {
+                        scope.launch {
+                            cameraPositionState.animate(
+                                CameraUpdateFactory.newLatLngZoom(LatLng(vehicle.lat, vehicle.lon), 15.5f)
+                            )
+                        }
+                    }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun VehicleTelemetryCard(vehicle: LiveVehicleMarker) {
+private fun VehicleTelemetryCard(
+    vehicle: LiveVehicleMarker,
+    onSelect: () -> Unit = {}
+) {
     val delayColor = when {
         vehicle.delaySeconds <= 30 -> Color(0xFF4ADE80)
         vehicle.delaySeconds <= 120 -> Color(0xFFFACC15)
@@ -175,6 +304,7 @@ private fun VehicleTelemetryCard(vehicle: LiveVehicleMarker) {
         modifier = Modifier
             .width(235.dp)
             .liquidGlass(cornerRadius = 18.dp, tintColor = delayColor)
+            .clickable(onClick = onSelect)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
@@ -229,7 +359,8 @@ private fun VehicleTelemetryCard(vehicle: LiveVehicleMarker) {
 }
 
 @Composable
-private fun InteractivePragueTelemetryRadar(
+private fun DynamicTelemetryRadar(
+    centerTarget: LatLng,
     vehicles: List<LiveVehicleMarker>,
     showParkings: Boolean,
     parkings: List<cz.pid.golemiocompanion.domain.model.ParkingLotPR>,
@@ -247,9 +378,10 @@ private fun InteractivePragueTelemetryRadar(
             )
         }
 
+        // Dynamická projekce relativně k aktuálnímu středu (Praha / Mladá Boleslav / vlastní pozice)
         fun project(lat: Double, lon: Double): Offset {
-            val dx = ((lon - 14.4178) * 14000.0).toFloat()
-            val dy = ((50.0755 - lat) * 20000.0).toFloat()
+            val dx = ((lon - centerTarget.longitude) * 16000.0).toFloat()
+            val dy = ((centerTarget.latitude - lat) * 22000.0).toFloat()
             return Offset(center.x + dx, center.y + dy)
         }
 
