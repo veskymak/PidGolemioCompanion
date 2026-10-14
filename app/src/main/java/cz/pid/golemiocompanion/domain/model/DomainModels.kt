@@ -93,6 +93,17 @@ data class EmergencyTransferOption(
 )
 
 @Immutable
+data class VehicleUpcomingStop(
+    val stopId: String,
+    val stopName: String,
+    val sequence: Int,
+    val minutesUntilArrival: Long,
+    val scheduledTime: String,
+    val predictedTime: String,
+    val isDestination: Boolean = false
+)
+
+@Immutable
 data class LiveVehicleMarker(
     val tripId: String,
     val routeShortName: String,
@@ -104,7 +115,16 @@ data class LiveVehicleMarker(
     val speedKmh: Double,
     val lastUpdatedEpochMs: Long,
     val isDeadReckoningEstimated: Boolean = false,
-    val isFromRawInputGateway: Boolean = false
+    val isFromRawInputGateway: Boolean = false,
+    val isTracking: Boolean = true,
+    val nextStopId: String? = null,
+    val nextStopName: String? = null,
+    val nextStopSequence: Int? = null,
+    val nextStopArrivalEpochMs: Long? = null,
+    val lastStopName: String? = null,
+    val vehicleRegistrationNumber: Long? = null,
+    val isAirConditioned: Boolean? = null,
+    val isWheelchairAccessible: Boolean? = null
 )
 
 @Immutable

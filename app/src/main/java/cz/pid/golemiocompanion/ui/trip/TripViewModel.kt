@@ -37,7 +37,10 @@ data class TripUiState(
     val departuresError: String? = null,
     val isLiveData: Boolean = false,
     val isApiKeyConfigured: Boolean = false,
-    val stopSuggestions: List<PidStopSuggestion> = emptyList()
+    val stopSuggestions: List<PidStopSuggestion> = emptyList(),
+    val selectedVehicle: LiveVehicleMarker? = null,
+    val selectedVehicleUpcomingStops: List<VehicleUpcomingStop> = emptyList(),
+    val isLoadingVehicleDetail: Boolean = false
 )
 
 class TripViewModel(
@@ -333,13 +336,61 @@ class TripViewModel(
                 else _uiState.value.mapSharedBikes
             }
 
-            _uiState.update {
-                it.copy(
-                    liveVehicles = vehiclesDeferred.await(),
-                    parkingsPR = parkingsDeferred.await(),
-                    mapSharedBikes = bikesDeferred.await()
+            val updatedVehicles = vehiclesDeferred.await()
+            val updatedParkings = parkingsDeferred.await()
+            val updatedBikes = bikesDeferred.await()
+
+            _uiState.update { state ->
+                val updatedSelected = if (state.selectedVehicle != null) {
+                    updatedVehicles.find { it.tripId == state.selectedVehicle.tripId } ?: state.selectedVehicle
+                } else null
+                state.copy(
+                    liveVehicles = updatedVehicles,
+                    parkingsPR = updatedParkings,
+                    mapSharedBikes = updatedBikes,
+                    selectedVehicle = updatedSelected
                 )
             }
+        }
+    }
+
+    fun selectVehicleForDetail(tripId: String?) {
+        if (tripId.isNullOrBlank()) {
+            dismissVehicleDetail()
+            return
+        }
+        val vehicle = _uiState.value.liveVehicles.find { it.tripId == tripId }
+            ?: return
+        _uiState.update {
+            it.copy(
+                selectedVehicle = vehicle,
+                selectedVehicleUpcomingStops = emptyList(),
+                isLoadingVehicleDetail = vehicle.isTracking
+            )
+        }
+        if (vehicle.isTracking) {
+            viewModelScope.launch {
+                val lab = currentLabSettings()
+                val stops = repository.getVehicleUpcomingStops(vehicle, lab.golemioApiKey)
+                _uiState.update {
+                    if (it.selectedVehicle?.tripId == tripId) {
+                        it.copy(
+                            selectedVehicleUpcomingStops = stops,
+                            isLoadingVehicleDetail = false
+                        )
+                    } else it
+                }
+            }
+        }
+    }
+
+    fun dismissVehicleDetail() {
+        _uiState.update {
+            it.copy(
+                selectedVehicle = null,
+                selectedVehicleUpcomingStops = emptyList(),
+                isLoadingVehicleDetail = false
+            )
         }
     }
 

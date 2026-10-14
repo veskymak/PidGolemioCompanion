@@ -104,7 +104,10 @@ data class VehiclePropertiesDto(
 @Serializable
 data class VehicleTripPropertiesDto(
     @SerialName("gtfs") val gtfs: VehicleGtfsDto,
-    @SerialName("vehicle_type") val vehicleType: VehicleTypeDto? = null
+    @SerialName("vehicle_type") val vehicleType: VehicleTypeDto? = null,
+    @SerialName("vehicle_registration_number") val vehicleRegistrationNumber: Long? = null,
+    @SerialName("wheelchair_accessible") val wheelchairAccessible: Boolean? = null,
+    @SerialName("air_conditioned") val airConditioned: Boolean? = null
 )
 
 @Serializable
@@ -126,7 +129,41 @@ data class VehicleLastPositionDto(
     @SerialName("delay") val delay: VehicleDelayDetailDto? = null,
     @SerialName("origin_timestamp") val originTimestamp: String? = null,
     @SerialName("speed") val speed: Double? = null,
-    @SerialName("is_canceled") val isCanceled: Boolean = false
+    @SerialName("is_canceled") val isCanceled: Boolean = false,
+    @SerialName("tracking") val tracking: Boolean? = true,
+    @SerialName("next_stop") val nextStop: VehicleStopDetailDto? = null,
+    @SerialName("last_stop") val lastStop: VehicleStopDetailDto? = null
+)
+
+@Serializable
+data class VehicleStopDetailDto(
+    @SerialName("id") val id: String? = null,
+    @SerialName("sequence") val sequence: Int? = null,
+    @SerialName("arrival_time") val arrivalTime: String? = null,
+    @SerialName("departure_time") val departureTime: String? = null
+)
+
+@Serializable
+data class GtfsTripDetailDto(
+    @SerialName("trip_id") val tripId: String = "",
+    @SerialName("trip_headsign") val tripHeadsign: String? = null,
+    @SerialName("stop_times") val stopTimes: List<GtfsStopTimeDto> = emptyList(),
+    @SerialName("stops") val stops: List<GtfsStopDto> = emptyList()
+)
+
+@Serializable
+data class GtfsStopTimeDto(
+    @SerialName("stop_id") val stopId: String = "",
+    @SerialName("stop_sequence") val stopSequence: Int = 0,
+    @SerialName("arrival_time") val arrivalTime: String = "",
+    @SerialName("departure_time") val departureTime: String = ""
+)
+
+@Serializable
+data class GtfsStopDto(
+    @SerialName("stop_id") val stopId: String = "",
+    @SerialName("stop_name") val stopName: String = "",
+    @SerialName("platform_code") val platformCode: String? = null
 )
 
 @Serializable

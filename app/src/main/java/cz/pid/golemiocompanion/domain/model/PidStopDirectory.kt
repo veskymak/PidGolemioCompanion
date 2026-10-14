@@ -532,5 +532,13 @@ object PidStopDirectory {
         .distinctBy { it.name }
         .take(limit)
     }
+
+    fun findStopNameById(id: String?): String? {
+        if (id.isNullOrBlank()) return null
+        return ALL_STOPS.find { stop ->
+            stop.name.equals(id, ignoreCase = true) ||
+            stop.subtitle.contains(id, ignoreCase = true)
+        }?.name
+    }
 }
 

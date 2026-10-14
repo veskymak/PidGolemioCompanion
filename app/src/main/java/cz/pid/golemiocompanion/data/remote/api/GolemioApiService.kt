@@ -21,13 +21,21 @@ interface GolemioApiService {
         @Query("limit") limit: Int = 50
     ): PidDepartureBoardResponseDto
 
-    @GET("v2/pid/vehiclepositions")
+    @GET("v2/vehiclepositions")
     suspend fun getVehiclePositions(
         @Header("X-Access-Token") apiKey: String,
         @Query("routeShortName") routeShortName: String? = null,
-        @Query("includeNotTracking") includeNotTracking: Boolean = false,
+        @Query("includeNotTracking") includeNotTracking: Boolean = true,
         @Query("limit") limit: Int = 2500
     ): VehiclePositionsGeoJsonDto
+
+    @GET("v2/gtfs/trips/{id}")
+    suspend fun getTripDetails(
+        @Header("X-Access-Token") apiKey: String,
+        @retrofit2.http.Path("id") tripId: String,
+        @Query("includeStops") includeStops: Boolean = true,
+        @Query("includeStopTimes") includeStopTimes: Boolean = true
+    ): GtfsTripDetailDto
 
     @GET("pid/input-gateway/v1/vehiclepositions/raw")
     suspend fun getRawTelemetryStream(

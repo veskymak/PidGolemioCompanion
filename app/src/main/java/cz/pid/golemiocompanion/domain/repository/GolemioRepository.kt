@@ -36,4 +36,5 @@ interface GolemioRepository {
     ): List<LiveVehicleMarker>
 
     suspend fun getParkingsPR(apiKey: String): List<ParkingLotPR>
+    suspend fun getVehicleUpcomingStops(vehicle: LiveVehicleMarker, apiKey: String): List<VehicleUpcomingStop>
 }

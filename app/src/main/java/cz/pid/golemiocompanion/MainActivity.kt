@@ -211,10 +211,26 @@ class MainActivity : ComponentActivity() {
                             }
                         ) {
                             composable("trip") {
-                                TripDashboardScreen(viewModel = tripViewModel)
+                                TripDashboardScreen(
+                                    viewModel = tripViewModel,
+                                    onNavigateToLab = {
+                                        navController.navigate("lab") {
+                                            popUpTo("trip")
+                                            launchSingleTop = true
+                                        }
+                                    }
+                                )
                             }
                             composable("map") {
-                                LiveMapScreen(viewModel = tripViewModel)
+                                LiveMapScreen(
+                                    viewModel = tripViewModel,
+                                    onNavigateToLab = {
+                                        navController.navigate("lab") {
+                                            popUpTo("trip")
+                                            launchSingleTop = true
+                                        }
+                                    }
+                                )
                             }
                             composable("lab") {
                                 TestingSettingsScreen(

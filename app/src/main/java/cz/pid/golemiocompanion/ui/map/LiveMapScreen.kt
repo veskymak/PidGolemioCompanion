@@ -9,11 +9,15 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -27,6 +31,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -41,9 +46,7 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.maps.android.compose.*
 import cz.pid.golemiocompanion.BuildConfig
-import cz.pid.golemiocompanion.domain.model.LiveVehicleMarker
-import cz.pid.golemiocompanion.domain.model.ParkingLotPR
-import cz.pid.golemiocompanion.domain.model.SharedBikeStation
+import cz.pid.golemiocompanion.domain.model.*
 import cz.pid.golemiocompanion.ui.components.liquidGlass
 import cz.pid.golemiocompanion.ui.trip.TripViewModel
 import kotlinx.coroutines.launch
@@ -57,7 +60,8 @@ enum class MapDisplayMode(val label: String) {
 @Composable
 fun LiveMapScreen(
     viewModel: TripViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateToLab: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -191,7 +195,8 @@ fun LiveMapScreen(
                     bikes = uiState.mapSharedBikes,
                     centerLat = webCenterLat,
                     centerLon = webCenterLon,
-                    zoom = webZoom
+                    zoom = webZoom,
+                    onVehicleClick = viewModel::selectVehicleForDetail
                 )
             }
             MapDisplayMode.GOOGLE_SDK -> {
@@ -215,6 +220,7 @@ fun LiveMapScreen(
 
                     uiState.liveVehicles.forEach { vehicle ->
                         val markerHue = when {
+                            !vehicle.isTracking -> BitmapDescriptorFactory.HUE_VIOLET
                             vehicle.delaySeconds <= 30 -> BitmapDescriptorFactory.HUE_AZURE
                             vehicle.delaySeconds <= 120 -> BitmapDescriptorFactory.HUE_YELLOW
                             else -> BitmapDescriptorFactory.HUE_RED
@@ -223,12 +229,20 @@ fun LiveMapScreen(
                             state = MarkerState(position = LatLng(vehicle.lat, vehicle.lon)),
                             title = "Linka ${vehicle.routeShortName} → ${vehicle.headsign}",
                             snippet = buildString {
-                                append("Zpoždění: ${vehicle.delaySeconds} s • ${vehicle.speedKmh.toInt()} km/h")
-                                if (vehicle.isDeadReckoningEstimated) append(" [DEAD RECKONING]")
-                                if (vehicle.isFromRawInputGateway) append(" [RAW STREAM]")
+                                if (!vehicle.isTracking) {
+                                    append("⚠️ GPS tracker vypnutý (neznámé zpoždění)")
+                                } else {
+                                    append("Zpoždění: ${vehicle.delaySeconds} s • ${vehicle.speedKmh.toInt()} km/h")
+                                    if (vehicle.isDeadReckoningEstimated) append(" [DEAD RECKONING]")
+                                    if (vehicle.isFromRawInputGateway) append(" [RAW STREAM]")
+                                }
                             },
                             icon = BitmapDescriptorFactory.defaultMarker(markerHue),
-                            rotation = vehicle.bearing
+                            rotation = vehicle.bearing,
+                            onClick = {
+                                viewModel.selectVehicleForDetail(vehicle.tripId)
+                                true
+                            }
                         )
                     }
 
@@ -493,6 +507,94 @@ fun LiveMapScreen(
                         webCenterLon = vehicle.lon
                         webZoom = 15.5f
                         animateCameraIfGoogleMap(LatLng(vehicle.lat, vehicle.lon), 15.5f)
+                        viewModel.selectVehicleForDetail(vehicle.tripId)
+                    }
+                )
+            }
+        }
+
+        // Výzva k zadání klíče – zobrazí se POUZE pokud uživatel klíč opravdu nemá zadaný
+        if (labSettings.golemioApiKey.isBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .liquidGlass(cornerRadius = 24.dp, tintColor = Color(0xFFF59E0B), surfaceAlphaTop = 0.35f)
+                        .padding(22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Key,
+                        contentDescription = null,
+                        tint = Color(0xFFFBBF24),
+                        modifier = Modifier.size(38.dp)
+                    )
+                    Text(
+                        text = "Zadejte svůj Golemio API klíč",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = "Pro zobrazení živých autobusů PID na mapě a jejich reálného zpoždění je potřeba bezplatný API klíč. Demo vozidla jsou vypnuta, aby vás nemátla.",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Button(
+                        onClick = onNavigateToLab,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                    ) {
+                        Text("Zadat klíč v Laboratoři", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Detail rozkliknutého vozidla s příjezdem na příští zastávky in real time
+        AnimatedVisibility(
+            visible = uiState.selectedVehicle != null,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 76.dp)
+        ) {
+            uiState.selectedVehicle?.let { vehicle ->
+                VehicleLiveDetailBottomSheet(
+                    vehicle = vehicle,
+                    upcomingStops = uiState.selectedVehicleUpcomingStops,
+                    isLoadingStops = uiState.isLoadingVehicleDetail,
+                    onDismiss = viewModel::dismissVehicleDetail,
+                    onStartCountdownTracking = {
+                        val dummyConnection = StopConnection(
+                            tripId = vehicle.tripId,
+                            routeShortName = vehicle.routeShortName,
+                            routeType = 3,
+                            headsign = vehicle.headsign,
+                            stopName = vehicle.nextStopName ?: "Zastávka na trase",
+                            platformCode = "-",
+                            stopLat = vehicle.lat,
+                            stopLon = vehicle.lon,
+                            scheduledDepartureEpochMs = vehicle.nextStopArrivalEpochMs ?: System.currentTimeMillis(),
+                            predictedDepartureEpochMs = (vehicle.nextStopArrivalEpochMs ?: System.currentTimeMillis()) + (vehicle.delaySeconds * 1000L),
+                            scheduledArrivalDestinationEpochMs = System.currentTimeMillis() + (20 * 60_000L),
+                            predictedArrivalDestinationEpochMs = System.currentTimeMillis() + (20 * 60_000L) + (vehicle.delaySeconds * 1000L),
+                            destinationName = vehicle.headsign,
+                            officialDelaySeconds = vehicle.delaySeconds,
+                            isAirConditioned = vehicle.isAirConditioned ?: true,
+                            isWheelchairAccessible = vehicle.isWheelchairAccessible ?: true
+                        )
+                        viewModel.startTrackingConnection(dummyConnection)
+                        viewModel.dismissVehicleDetail()
                     }
                 )
             }
@@ -652,7 +754,8 @@ private fun WebOsmMap(
     centerLat: Double,
     centerLon: Double,
     zoom: Float,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onVehicleClick: (String) -> Unit = {}
 ) {
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var isReady by remember { mutableStateOf(false) }
@@ -668,7 +771,7 @@ private fun WebOsmMap(
             <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
             <style>
                 html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0b1120; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-                .leaflet-tile { filter: brightness(0.65) invert(1) contrast(3) hue-rotate(200deg) saturate(0.35); }
+                .leaflet-tile { filter: brightness(0.7) invert(1) contrast(2.5) hue-rotate(200deg) saturate(0.35); }
                 .bus-marker {
                     display: flex;
                     align-items: center;
@@ -681,10 +784,12 @@ private fun WebOsmMap(
                     border: 2px solid rgba(255, 255, 255, 0.9);
                     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
                     white-space: nowrap;
+                    cursor: pointer;
                 }
                 .bus-green { background: #16a34a; }
                 .bus-yellow { background: #d97706; }
                 .bus-red { background: #dc2626; }
+                .bus-grey { background: #475569; border-color: #94a3b8; }
                 
                 .user-marker {
                     position: relative;
@@ -761,10 +866,18 @@ private fun WebOsmMap(
                     window.map = L.map('map', { zoomControl: false, attributionControl: false })
                         .setView([$centerLat, $centerLon], ${zoom.toInt()});
                     
-                    // Bezplatné standardní OpenStreetMap dlaždice (bez API klíče, 100% spolehlivé)
-                    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    // CARTO Voyager tiles - bezplatné a 100% spolehlivé pro mobilní WebViews
+                    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                        subdomains: ['a', 'b', 'c', 'd'],
                         maxZoom: 19
                     }).addTo(window.map);
+
+                    setTimeout(function() {
+                        if (window.map) window.map.invalidateSize();
+                    }, 250);
+                    window.addEventListener('resize', function() {
+                        if (window.map) window.map.invalidateSize();
+                    });
 
                     window.markers = {};
                     window.parkingsLayer = L.layerGroup().addTo(window.map);
@@ -806,30 +919,31 @@ private fun WebOsmMap(
                     for (var i = 0; i < list.length; i++) {
                         var v = list[i];
                         currentIds[v.id] = true;
-                        var colorClass = v.delay <= 30 ? 'bus-green' : (v.delay <= 120 ? 'bus-yellow' : 'bus-red');
-                        var iconHtml = '<div class="bus-marker ' + colorClass + '">' + v.line + '</div>';
+                        var isTracked = v.tracking !== false;
+                        var colorClass = !isTracked ? 'bus-grey' : (v.delay <= 30 ? 'bus-green' : (v.delay <= 120 ? 'bus-yellow' : 'bus-red'));
+                        var labelText = (!isTracked ? '⚠️ ' : '') + v.line;
+                        var iconHtml = '<div class="bus-marker ' + colorClass + '">' + labelText + '</div>';
                         var icon = L.divIcon({
                             className: 'leaflet-bus-icon',
                             html: iconHtml,
-                            iconSize: [38, 22],
-                            iconAnchor: [19, 11]
+                            iconSize: [42, 22],
+                            iconAnchor: [21, 11]
                         });
 
-                        var popupContent = '<div style="min-width:140px;">' +
-                            '<b style="font-size:14px;color:#38bdf8;">Linka ' + v.line + '</b><br>' +
-                            '<span style="color:#e2e8f0;">' + v.headsign + '</span><br>' +
-                            '<div style="margin-top:4px;font-size:11px;">' +
-                            'Zpoždění: <b style="color:' + (v.delay > 60 ? '#f87171' : '#4ade80') + '">+' + v.delay + ' s</b><br>' +
-                            'Rychlost: ' + Math.round(v.speed) + ' km/h' +
-                            '</div></div>';
-
-                        if (window.markers[v.id]) {
-                            window.markers[v.id].setLatLng([v.lat, v.lng]);
-                            window.markers[v.id].setIcon(icon);
+                        var marker = window.markers[v.id];
+                        if (marker) {
+                            marker.setLatLng([v.lat, v.lng]);
+                            marker.setIcon(icon);
                         } else {
-                            window.markers[v.id] = L.marker([v.lat, v.lng], { icon: icon })
-                                .addTo(window.map)
-                                .bindPopup(popupContent);
+                            marker = L.marker([v.lat, v.lng], { icon: icon }).addTo(window.map);
+                            (function(tripId) {
+                                marker.on('click', function() {
+                                    if (window.AndroidBridge && window.AndroidBridge.onVehicleClicked) {
+                                        window.AndroidBridge.onVehicleClicked(tripId);
+                                    }
+                                });
+                            })(v.id);
+                            window.markers[v.id] = marker;
                         }
                     }
                     for (var id in window.markers) {
@@ -904,6 +1018,13 @@ private fun WebOsmMap(
                 settings.databaseEnabled = true
                 settings.cacheMode = WebSettings.LOAD_DEFAULT
                 settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 PidGolemioCompanion/1.0"
+                addJavascriptInterface(object {
+                    @android.webkit.JavascriptInterface
+                    fun onVehicleClicked(tripId: String) {
+                        onVehicleClick(tripId)
+                    }
+                }, "AndroidBridge")
                 webChromeClient = WebChromeClient()
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
@@ -925,10 +1046,10 @@ private fun WebOsmMap(
                 }
 
                 // Aktualizace vozidel PID
-                val vehiclesJson = vehicles.take(120).map { v ->
+                val vehiclesJson = vehicles.take(200).map { v ->
                     val cleanLine = v.routeShortName.replace("\"", "").replace("'", "")
                     val cleanHeadsign = v.headsign.replace("\"", "").replace("'", "")
-                    """{"id":"${v.tripId.replace("\"", "")}","line":"$cleanLine","headsign":"$cleanHeadsign","lat":${v.lat},"lng":${v.lon},"delay":${v.delaySeconds},"speed":${v.speedKmh}}"""
+                    """{"id":"${v.tripId.replace("\"", "")}","line":"$cleanLine","headsign":"$cleanHeadsign","lat":${v.lat},"lng":${v.lon},"delay":${v.delaySeconds},"speed":${v.speedKmh},"tracking":${v.isTracking}}"""
                 }.joinToString(",", "[", "]")
                 webView.evaluateJavascript("if (typeof updateVehicles === 'function') updateVehicles($vehiclesJson);", null)
 
@@ -957,4 +1078,303 @@ private fun WebOsmMap(
             }
         }
     )
+}
+
+@Composable
+private fun VehicleLiveDetailBottomSheet(
+    vehicle: LiveVehicleMarker,
+    upcomingStops: List<VehicleUpcomingStop>,
+    isLoadingStops: Boolean,
+    onDismiss: () -> Unit,
+    onStartCountdownTracking: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = Color(0xF20F172A),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+        shadowElevation = 24.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .liquidGlass(
+                    cornerRadius = 24.dp,
+                    tintColor = Color(0xFF38BDF8),
+                    surfaceAlphaTop = 0.35f,
+                    surfaceAlphaBottom = 0.18f
+                )
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Hlavička s číslem linky, cílem a křížkem zavřít
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Surface(
+                        color = if (vehicle.routeShortName.startsWith("S") || vehicle.routeShortName.startsWith("R")) {
+                            Color(0xFF2563EB)
+                        } else {
+                            Color(0xFFDC2626)
+                        },
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = vehicle.routeShortName,
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 18.sp,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "směr ${vehicle.headsign}",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            maxLines = 1
+                        )
+                        if (vehicle.vehicleRegistrationNumber != null && vehicle.vehicleRegistrationNumber > 0) {
+                            Text(
+                                text = "Ev. č. vozu: ${vehicle.vehicleRegistrationNumber}",
+                                color = Color.White.copy(alpha = 0.6f),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Zavřít detail",
+                        tint = Color.White.copy(alpha = 0.7f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // Stav telemetrie a GPS trackeru
+            if (!vehicle.isTracking) {
+                Surface(
+                    color = Color(0xFFEF4444).copy(alpha = 0.18f),
+                    border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.6f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(text = "⚠️", fontSize = 20.sp)
+                        Column {
+                            Text(
+                                text = "Vypnutý GPS tracker vozidla",
+                                color = Color(0xFFFCA5A5),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                text = "Vozidlo momentálně nevysílá telemetrii do dispečinku PID. Aplikace si data nevymýšlí – přesné zpoždění a živá poloha nejsou dostupné.",
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Živé telemetrické údaje: Zpoždění, Rychlost, Výbava
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val delayColor = when {
+                        vehicle.delaySeconds <= 30 -> Color(0xFF4ADE80)
+                        vehicle.delaySeconds <= 120 -> Color(0xFFFACC15)
+                        else -> Color(0xFFF87171)
+                    }
+                    val delayText = when {
+                        vehicle.delaySeconds <= 0 -> "Včas (0 s)"
+                        vehicle.delaySeconds < 60 -> "+${vehicle.delaySeconds} s"
+                        else -> "+${vehicle.delaySeconds / 60} min (${vehicle.delaySeconds} s)"
+                    }
+                    Surface(
+                        color = delayColor.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, delayColor.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text(text = "Zpoždění", color = Color.White.copy(alpha = 0.65f), fontSize = 10.sp)
+                            Text(text = delayText, color = delayColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+
+                    Surface(
+                        color = Color(0xFF38BDF8).copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text(text = "Rychlost", color = Color.White.copy(alpha = 0.65f), fontSize = 10.sp)
+                            Text(text = "${vehicle.speedKmh.toInt()} km/h", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+
+                    if (vehicle.isAirConditioned == true || vehicle.isWheelchairAccessible == true) {
+                        Surface(
+                            color = Color.White.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(0.8f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(text = "Výbava", color = Color.White.copy(alpha = 0.65f), fontSize = 10.sp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    if (vehicle.isAirConditioned == true) Text(text = "❄️", fontSize = 13.sp)
+                                    if (vehicle.isWheelchairAccessible == true) Text(text = "♿", fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Sekce: Příští zastávky v reálném čase
+            Text(
+                text = "⏱️ Příjezd na příští zastávky (in real time):",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp
+            )
+
+            if (isLoadingStops) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFF38BDF8))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(text = "Zjišťuji časy příjezdu ze systému PID...", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                }
+            } else if (upcomingStops.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 200.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    upcomingStops.take(6).forEach { stop ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = if (stop.isDestination) "🏁" else "🚏",
+                                    fontSize = 14.sp
+                                )
+                                Column {
+                                    Text(
+                                        text = stop.stopName,
+                                        color = Color.White,
+                                        fontWeight = if (stop.isDestination) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 12.sp,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "JŘ: ${stop.scheduledTime} • Očekáváno: ${stop.predictedTime}",
+                                        color = Color.White.copy(alpha = 0.55f),
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                color = if (stop.minutesUntilArrival <= 3) Color(0xFF4ADE80).copy(alpha = 0.2f) else Color(0xFF38BDF8).copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = if (stop.minutesUntilArrival == 0L) "přijíždí" else "za ${stop.minutesUntilArrival} min",
+                                    color = if (stop.minutesUntilArrival <= 3) Color(0xFF4ADE80) else Color(0xFF38BDF8),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (!vehicle.isTracking) {
+                Text(
+                    text = "Časy na příštích zastávkách nelze živě zobrazit, protože vozidlo nemá zapnutý GPS tracker.",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                        .padding(10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "🏁 Cílová stanice: ${vehicle.headsign}",
+                        color = Color.White,
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        text = "dle jízdního řádu",
+                        color = Color(0xFF38BDF8),
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            Button(
+                onClick = onStartCountdownTracking,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Timer,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Spustit odpočet pro tuto linku", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+        }
+    }
 }

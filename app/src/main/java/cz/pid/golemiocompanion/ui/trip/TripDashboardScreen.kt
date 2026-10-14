@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -30,7 +31,8 @@ private val departureHHmmFormatter: DateTimeFormatter =
 @Composable
 fun TripDashboardScreen(
     viewModel: TripViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateToLab: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val remainingSeconds by viewModel.remainingSecondsFlow.collectAsStateWithLifecycle()
@@ -43,9 +45,7 @@ fun TripDashboardScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item(key = "meteo_aqi_card") {
-            MeteoAirQualityGlassCard(weatherInfo = uiState.weatherAndAqi)
-        }
+        
 
         if (uiState.trackingMode !is TripTrackingMode.Idle) {
             item(key = "active_countdown_panel") {
@@ -360,7 +360,7 @@ fun TripDashboardScreen(
                     val badgeText = when {
                         uiState.isLiveData -> "● LIVE Golemio"
                         uiState.isApiKeyConfigured -> "● Golemio API"
-                        else -> "DEMO data"
+                        else -> "● Bez API klíče"
                     }
                     val badgeColor = when {
                         uiState.isLiveData -> Color(0xFF4ADE80)
@@ -373,6 +373,49 @@ fun TripDashboardScreen(
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
+                }
+            }
+        }
+
+        if (!uiState.isApiKeyConfigured) {
+            item(key = "api_key_prompt_card") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .liquidGlass(cornerRadius = 22.dp, tintColor = Color(0xFFF59E0B), surfaceAlphaTop = 0.28f)
+                        .padding(18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Key,
+                            contentDescription = null,
+                            tint = Color(0xFFFBBF24),
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            text = "Chybí Golemio API klíč",
+                            color = Color(0xFFFBBF24),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
+                    Text(
+                        text = "Pro načtení živých odjezdů autobusů a vlaků zadejte svůj bezplatný klíč v sekci Laboratoř. Aplikace si bez klíče data nevymýšlí (demo data byla vypnuta).",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Button(
+                        onClick = onNavigateToLab,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                    ) {
+                        Text("Zadat klíč v Laboratoři", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -391,7 +434,7 @@ fun TripDashboardScreen(
             }
         }
 
-        if (uiState.departures.isEmpty() && uiState.departuresError == null && !uiState.isLoading) {
+        if (uiState.isApiKeyConfigured && uiState.departures.isEmpty() && uiState.departuresError == null && !uiState.isLoading) {
             item(key = "departures_empty") {
                 Text(
                     text = if (uiState.lineFilterQuery.isNotBlank()) {

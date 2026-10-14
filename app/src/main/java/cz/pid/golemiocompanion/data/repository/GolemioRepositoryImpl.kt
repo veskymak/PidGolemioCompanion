@@ -25,6 +25,7 @@ class GolemioRepositoryImpl(
 
     private val lastKnownVehicleCache = mutableMapOf<String, LiveVehicleMarker>()
     private val departuresCache = ConcurrentHashMap<String, Pair<Long, List<StopConnection>>>()
+    private val stopNamesByIdCache = ConcurrentHashMap<String, String>()
 
     override suspend fun getDeparturesForStop(
         stopQuery: String,
@@ -56,6 +57,7 @@ class GolemioRepositoryImpl(
                     )
 
                     if (res.departures.isNotEmpty()) {
+                        res.stops.forEach { stopNamesByIdCache[it.stopId] = it.stopName }
                         val stopsById = res.stops.associateBy { it.stopId }
                         val primaryStop = res.stops.firstOrNull()
 
@@ -143,128 +145,9 @@ class GolemioRepositoryImpl(
             return emptyList()
         }
 
-        // Demo / offline data – realistic GTFS timetable schedule based on Prague time
-        val cleanStop = stopQuery.ifBlank { "Anděl" }
-        val isMb = cleanStop.contains("boleslav", ignoreCase = true) || cleanStop.contains("mlad", ignoreCase = true)
-        val isTrain = cleanStop.contains("město", ignoreCase = true) || cleanStop.contains("mesto", ignoreCase = true) ||
-            cleanStop.contains("hl.nádr", ignoreCase = true) || cleanStop.contains("hl.n", ignoreCase = true)
-
-        val pragueZone = ZoneId.of("Europe/Prague")
-        val nowZdt = ZonedDateTime.now(pragueZone)
-        val nowHour = nowZdt.hour
-        val nowMinute = nowZdt.minute
-
-        data class TimetableItem(
-            val line: String,
-            val headsign: String,
-            val platform: String,
-            val hour: Int,
-            val minute: Int,
-            val routeType: Int = 3
-        )
-
-        val timetableItems: List<TimetableItem> = when {
-            isMb && isTrain -> {
-                listOf(
-                    TimetableItem("S30", "Praha hl.n. (přes Všetaty)", "1", (nowHour + 1) % 24, 12, routeType = 2),
-                    TimetableItem("R43", "Praha Masarykovo n.", "2", (nowHour + 1) % 24, 42, routeType = 2),
-                    TimetableItem("S31", "Nymburk hl.n.", "1", (nowHour + 2) % 24, 8, routeType = 2),
-                    TimetableItem("S30", "Turnov", "2", (nowHour + 2) % 24, 35, routeType = 2)
-                )
-            }
-            isMb && !isTrain -> {
-                if (nowHour >= 21 || nowHour < 5) {
-                    // Reálný noční jízdní řád Mladá Boleslav, aut.st. z PID Lítačka:
-                    // V noci jede pouze 315 ve 23:25 a další spoje až brzy ráno (od 1:10)
-                    listOf(
-                        TimetableItem("315", "Mnichovo Hradiště,dopravní terminál", "7", 23, 25),
-                        TimetableItem("345", "Liberec,aut.nádr.", "27", 1, 10),
-                        TimetableItem("315", "Černý Most", "8", 4, 10),
-                        TimetableItem("315", "Mnichovo Hradiště,dopravní terminál", "7", 4, 30),
-                        TimetableItem("345", "Černý Most", "8", 4, 35),
-                        TimetableItem("315", "Černý Most", "8", 4, 40),
-                        TimetableItem("315", "Mnichovo Hradiště,dopravní terminál", "7", 4, 55),
-                        TimetableItem("712", "Katusice", "2", 5, 5),
-                        TimetableItem("412", "Černý Most", "8", 5, 10),
-                        TimetableItem("763", "Mladá Boleslav,Zalužany ŠKODA", "3", 5, 14)
-                    )
-                } else {
-                    // Denní jízdní řád Mladá Boleslav, aut.st. (pravidelné denní spoje)
-                    listOf(
-                        TimetableItem("412", "Praha, Černý Most (Expres)", "8", nowHour, (nowMinute + 12) % 60),
-                        TimetableItem("315", "Mnichovo Hradiště,dopravní terminál", "7", nowHour, (nowMinute + 25) % 60),
-                        TimetableItem("345", "Liberec,aut.nádr.", "27", nowHour, (nowMinute + 38) % 60),
-                        TimetableItem("467", "Mělník, žel.st.", "3", (nowHour + 1) % 24, (nowMinute + 5) % 60),
-                        TimetableItem("715", "Bělá pod Bezdězem, nám.", "4", (nowHour + 1) % 24, (nowMinute + 20) % 60),
-                        TimetableItem("720", "Mnichovo Hradiště, nám.", "2", (nowHour + 1) % 24, (nowMinute + 35) % 60),
-                        TimetableItem("722", "Dolní Bousov, nám.", "5", (nowHour + 1) % 24, (nowMinute + 50) % 60)
-                    )
-                }
-            }
-            else -> {
-                // Praha (Anděl a ostatní stanice)
-                if (nowHour >= 24 || nowHour < 5) {
-                    listOf(
-                        TimetableItem("98", "Spojovací", "1", nowHour, (nowMinute + 14) % 60, routeType = 0),
-                        TimetableItem("99", "Nádraží Hostivař", "2", nowHour, (nowMinute + 29) % 60, routeType = 0),
-                        TimetableItem("904", "Sídliště Stodůlky", "A", (nowHour + 1) % 24, (nowMinute + 10) % 60),
-                        TimetableItem("907", "Přední Kopanina", "B", (nowHour + 1) % 24, (nowMinute + 40) % 60)
-                    )
-                } else {
-                    listOf(
-                        TimetableItem("9", "Spojovací", "1", nowHour, (nowMinute + 4) % 60, routeType = 0),
-                        TimetableItem("20", "Dědina", "2", nowHour, (nowMinute + 9) % 60, routeType = 0),
-                        TimetableItem("191", "Letiště Václava Havla", "B", nowHour, (nowMinute + 14) % 60),
-                        TimetableItem("167", "Nemocnice Na Homolce", "A", nowHour, (nowMinute + 21) % 60),
-                        TimetableItem("125", "Smíchovské nádraží → Skalka", "C", nowHour, (nowMinute + 31) % 60)
-                    )
-                }
-            }
-        }
-
-        val stopLat = if (isMb) 50.4114 else 50.0715
-        val stopLon = if (isMb) 14.9032 else 14.4035
-        val displayStopName = if (isMb && !cleanStop.contains(",")) "Mladá Boleslav,aut.st." else cleanStop
-
-        val generatedConnections = timetableItems.mapNotNull { item ->
-            val depZdt = if (item.hour < nowHour || (item.hour == nowHour && item.minute < nowMinute)) {
-                // Spoj jede až následující den (např. 01:10 ráno, když je 22:52)
-                nowZdt.plusDays(1).withHour(item.hour).withMinute(item.minute).withSecond(0).withNano(0)
-            } else {
-                // Spoj jede ještě dnes
-                nowZdt.withHour(item.hour).withMinute(item.minute).withSecond(0).withNano(0)
-            }
-            val schedMs = depZdt.toInstant().toEpochMilli()
-            val diffMs = schedMs - nowMs
-
-            // Vyfiltrovat spoje, které by byly mimo časové okno (v minulosti nebo za více než 14 hodin)
-            if (diffMs < -60_000L || diffMs > 14 * 3600 * 1000L) return@mapNotNull null
-
-            StopConnection(
-                tripId = "PID_TT_${item.line}_${item.hour}_${item.minute}",
-                routeShortName = item.line,
-                routeType = item.routeType,
-                headsign = item.headsign,
-                stopName = displayStopName,
-                platformCode = item.platform,
-                stopLat = stopLat,
-                stopLon = stopLon,
-                scheduledDepartureEpochMs = schedMs,
-                predictedDepartureEpochMs = schedMs,
-                scheduledArrivalDestinationEpochMs = schedMs + (22 * 60_000L),
-                predictedArrivalDestinationEpochMs = schedMs + (22 * 60_000L) + (phantomExtraSeconds * 1000L),
-                destinationName = item.headsign.substringBefore(" ("),
-                officialDelaySeconds = 0,
-                phantomAiExtraDelaySeconds = phantomExtraSeconds,
-                isAirConditioned = true,
-                isWheelchairAccessible = true
-            )
-        }.sortedBy { it.scheduledDepartureEpochMs }
-        .filter { conn ->
-            lineFilter.isNullOrBlank() || conn.routeShortName.equals(lineFilter.trim(), ignoreCase = true)
-        }
-
-        return generatedConnections
+        // Žádná falešná / demo data! Pokud uživatel nezadal API klíč, vracíme prázdný seznam,
+        // aby ho aplikace informovala o nutnosti zadat bezplatný klíč v Laboratoři.
+        return emptyList()
     }
 
     override suspend fun getAirQualityAndWeather(
@@ -447,7 +330,8 @@ class GolemioRepositoryImpl(
             runCatching {
                 val geoJson = apiService.getVehiclePositions(
                     apiKey = labSettings.golemioApiKey,
-                    routeShortName = lineFilter?.takeIf { it.isNotBlank() }
+                    routeShortName = lineFilter?.takeIf { it.isNotBlank() },
+                    includeNotTracking = true
                 )
                 val liveMarkers = geoJson.features.mapNotNull { feature ->
                     val coords = feature.geometry.coordinates
@@ -459,6 +343,19 @@ class GolemioRepositoryImpl(
                     val originMs = parseIsoTimestampToEpochMs(lastPos.originTimestamp, nowMs)
                     val ageSec = ((nowMs - originMs) / 1000L).coerceAtLeast(0L)
 
+                    // Pokud vozidlo nevysílá telemetrii nebo má tracking false, tracker je vypnutý
+                    val isTracked = lastPos.tracking != false && lastPos.delay?.actual != null
+
+                    val nextStop = lastPos.nextStop
+                    val lastStop = lastPos.lastStop
+                    val nextStopArrivalEpochMs = nextStop?.arrivalTime?.let { parseIsoTimestampToEpochMs(it, 0L) }
+                    val nextStopName = nextStop?.id?.let { id ->
+                        stopNamesByIdCache[id] ?: PidStopDirectory.findStopNameById(id) ?: id
+                    }
+                    val lastStopName = lastStop?.id?.let { id ->
+                        stopNamesByIdCache[id] ?: PidStopDirectory.findStopNameById(id) ?: id
+                    }
+
                     val baseMarker = LiveVehicleMarker(
                         tripId = gtfs.tripId,
                         routeShortName = gtfs.routeShortName,
@@ -466,12 +363,21 @@ class GolemioRepositoryImpl(
                         lat = lat,
                         lon = lon,
                         bearing = lastPos.bearing ?: 0f,
-                        delaySeconds = lastPos.delay?.actual ?: 0,
-                        speedKmh = lastPos.speed ?: 34.0,
-                        lastUpdatedEpochMs = originMs
+                        delaySeconds = if (isTracked) (lastPos.delay?.actual ?: 0) else 0,
+                        speedKmh = lastPos.speed ?: 0.0,
+                        lastUpdatedEpochMs = originMs,
+                        isTracking = isTracked,
+                        nextStopId = nextStop?.id,
+                        nextStopName = nextStopName,
+                        nextStopSequence = nextStop?.sequence,
+                        nextStopArrivalEpochMs = nextStopArrivalEpochMs,
+                        lastStopName = lastStopName,
+                        vehicleRegistrationNumber = feature.properties.trip.vehicleRegistrationNumber,
+                        isAirConditioned = feature.properties.trip.airConditioned,
+                        isWheelchairAccessible = feature.properties.trip.wheelchairAccessible
                     )
 
-                    val finalMarker = if (labSettings.deadReckoningInTunnels && ageSec > 25) {
+                    val finalMarker = if (isTracked && labSettings.deadReckoningInTunnels && ageSec > 25) {
                         extrapolateDeadReckoningPosition(baseMarker, ageSec)
                     } else {
                         baseMarker
@@ -480,110 +386,97 @@ class GolemioRepositoryImpl(
                     finalMarker
                 }
 
-                if (liveMarkers.isNotEmpty()) return liveMarkers
+                return liveMarkers
             }
         }
 
-        val tSec = (nowMs / 1000.0) % 360.0
-        val simulatedVehicles = listOf(
-            LiveVehicleMarker(
-                tripId = "191_BUS_A",
-                routeShortName = "191",
-                headsign = "Letiště Václava Havla",
-                lat = 50.0735 + sin(tSec * 0.03) * 0.006,
-                lon = 14.3980 + cos(tSec * 0.03) * 0.008,
-                bearing = ((tSec * 12) % 360).toFloat(),
-                delaySeconds = 25,
-                speedKmh = 38.0,
-                lastUpdatedEpochMs = nowMs - 22_000L,
-                isFromRawInputGateway = labSettings.rawInputGatewayStream
-            ),
-            LiveVehicleMarker(
-                tripId = "167_BUS_B",
-                routeShortName = "167",
-                headsign = "Na Knížecí",
-                lat = 50.0705 + cos(tSec * 0.04) * 0.005,
-                lon = 14.4040 + sin(tSec * 0.04) * 0.007,
-                bearing = ((tSec * 18 + 90) % 360).toFloat(),
-                delaySeconds = 140,
-                speedKmh = 29.0,
-                lastUpdatedEpochMs = nowMs,
-                isFromRawInputGateway = labSettings.rawInputGatewayStream
-            ),
-            LiveVehicleMarker(
-                tripId = "125_BUS_C",
-                routeShortName = "125",
-                headsign = "Skalka",
-                lat = 50.0620 + sin(tSec * 0.025) * 0.007,
-                lon = 14.4150 + cos(tSec * 0.025) * 0.009,
-                bearing = ((tSec * 9 + 180) % 360).toFloat(),
-                delaySeconds = 0,
-                speedKmh = 46.0,
-                lastUpdatedEpochMs = nowMs - 28_000L,
-                isFromRawInputGateway = labSettings.rawInputGatewayStream
-            ),
-            LiveVehicleMarker(
-                tripId = "119_BUS_D",
-                routeShortName = "119",
-                headsign = "Nádraží Veleslavín",
-                lat = 50.0955 + cos(tSec * 0.035) * 0.004,
-                lon = 14.3450 + sin(tSec * 0.035) * 0.009,
-                bearing = 115f,
-                delaySeconds = 75,
-                speedKmh = 52.0,
-                lastUpdatedEpochMs = nowMs,
-                isFromRawInputGateway = labSettings.rawInputGatewayStream
-            ),
-            LiveVehicleMarker(
-                tripId = "412_BUS_MB1",
-                routeShortName = "412",
-                headsign = "Praha, Černý Most",
-                lat = 50.4114 + sin(tSec * 0.03) * 0.005,
-                lon = 14.9032 + cos(tSec * 0.03) * 0.007,
-                bearing = 210f,
-                delaySeconds = 15,
-                speedKmh = 54.0,
-                lastUpdatedEpochMs = nowMs - 12_000L,
-                isFromRawInputGateway = labSettings.rawInputGatewayStream
-            ),
-            LiveVehicleMarker(
-                tripId = "715_BUS_MB2",
-                routeShortName = "715",
-                headsign = "Bělá pod Bezdězem, nám.",
-                lat = 50.4220 + cos(tSec * 0.02) * 0.004,
-                lon = 14.9150 + sin(tSec * 0.02) * 0.006,
-                bearing = 340f,
-                delaySeconds = 40,
-                speedKmh = 42.0,
-                lastUpdatedEpochMs = nowMs,
-                isFromRawInputGateway = labSettings.rawInputGatewayStream
-            ),
-            LiveVehicleMarker(
-                tripId = "467_BUS_MB3",
-                routeShortName = "467",
-                headsign = "Mělník, žel.st.",
-                lat = 50.4060 + sin(tSec * 0.025) * 0.004,
-                lon = 14.8960 + cos(tSec * 0.025) * 0.005,
-                bearing = 250f,
-                delaySeconds = 0,
-                speedKmh = 48.0,
-                lastUpdatedEpochMs = nowMs - 18_000L,
-                isFromRawInputGateway = labSettings.rawInputGatewayStream
-            )
-        )
+        // Žádná falešná / demo vozidla! Pokud uživatel nezadal API klíč, vracíme prázdný seznam.
+        return emptyList()
+    }
 
-        return simulatedVehicles
-            .filter { v ->
-                lineFilter.isNullOrBlank() || v.routeShortName.contains(lineFilter.trim(), ignoreCase = true)
-            }
-            .map { marker ->
-                val ageSec = (nowMs - marker.lastUpdatedEpochMs) / 1000L
-                if (labSettings.deadReckoningInTunnels && ageSec >= 20L) {
-                    extrapolateDeadReckoningPosition(marker, ageSec)
-                } else {
-                    marker
+    override suspend fun getVehicleUpcomingStops(
+        vehicle: LiveVehicleMarker,
+        apiKey: String
+    ): List<VehicleUpcomingStop> {
+        val nowMs = System.currentTimeMillis()
+        if (!vehicle.isTracking) return emptyList()
+
+        if (apiKey.isNotBlank() && vehicle.tripId.isNotBlank()) {
+            runCatching {
+                val tripDetails = apiService.getTripDetails(apiKey = apiKey, tripId = vehicle.tripId)
+                if (tripDetails.stopTimes.isNotEmpty()) {
+                    tripDetails.stops.forEach { stopNamesByIdCache[it.stopId] = it.stopName }
+                    val stopsById = tripDetails.stops.associateBy { it.stopId }
+
+                    val sortedTimes = tripDetails.stopTimes.sortedBy { it.stopSequence }
+                    val upcomingTimes = if (vehicle.nextStopSequence != null) {
+                        sortedTimes.filter { it.stopSequence >= vehicle.nextStopSequence }
+                    } else {
+                        sortedTimes
+                    }
+
+                    val result = upcomingTimes.map { st ->
+                        val stopName = stopsById[st.stopId]?.stopName
+                            ?: stopNamesByIdCache[st.stopId]
+                            ?: PidStopDirectory.findStopNameById(st.stopId)
+                            ?: "Zastávka ${st.stopSequence}"
+                        val schedMs = parseGtfsTimeToTodayEpochMs(st.arrivalTime.ifBlank { st.departureTime })
+                        val predMs = schedMs + (vehicle.delaySeconds * 1000L)
+                        val minutes = maxOf(0L, (predMs - nowMs) / 60_000L)
+                        val schedStr = formatEpochMsToHHmm(schedMs)
+                        val predStr = formatEpochMsToHHmm(predMs)
+
+                        VehicleUpcomingStop(
+                            stopId = st.stopId,
+                            stopName = stopName,
+                            sequence = st.stopSequence,
+                            minutesUntilArrival = minutes,
+                            scheduledTime = schedStr,
+                            predictedTime = predStr,
+                            isDestination = (st == sortedTimes.lastOrNull())
+                        )
+                    }
+                    if (result.isNotEmpty()) return result
                 }
             }
+        }
+
+        // Fallback: Pokud static GTFS trip data nejsou dostupná, zobrazíme nextStop a cílovou stanici
+        val fallbackList = mutableListOf<VehicleUpcomingStop>()
+        if (vehicle.nextStopName != null && vehicle.nextStopArrivalEpochMs != null && vehicle.nextStopArrivalEpochMs > 0L) {
+            val predMs = vehicle.nextStopArrivalEpochMs + (vehicle.delaySeconds * 1000L)
+            val minutes = maxOf(0L, (predMs - nowMs) / 60_000L)
+            fallbackList.add(
+                VehicleUpcomingStop(
+                    stopId = vehicle.nextStopId ?: "next_1",
+                    stopName = vehicle.nextStopName,
+                    sequence = vehicle.nextStopSequence ?: 1,
+                    minutesUntilArrival = minutes,
+                    scheduledTime = formatEpochMsToHHmm(vehicle.nextStopArrivalEpochMs),
+                    predictedTime = formatEpochMsToHHmm(predMs),
+                    isDestination = false
+                )
+            )
+        }
+
+        if (vehicle.headsign.isNotBlank()) {
+            val nextMs = vehicle.nextStopArrivalEpochMs ?: nowMs
+            val destMs = nextMs + (18 * 60_000L) + (vehicle.delaySeconds * 1000L)
+            val minutes = maxOf(fallbackList.firstOrNull()?.minutesUntilArrival ?: 0L, (destMs - nowMs) / 60_000L)
+            fallbackList.add(
+                VehicleUpcomingStop(
+                    stopId = "dest_final",
+                    stopName = vehicle.headsign,
+                    sequence = 999,
+                    minutesUntilArrival = minutes,
+                    scheduledTime = formatEpochMsToHHmm(destMs - (vehicle.delaySeconds * 1000L)),
+                    predictedTime = formatEpochMsToHHmm(destMs),
+                    isDestination = true
+                )
+            )
+        }
+
+        return fallbackList
     }
 
     override suspend fun getParkingsPR(apiKey: String): List<ParkingLotPR> {
@@ -734,5 +627,34 @@ class GolemioRepositoryImpl(
         }
 
         return list.distinct().take(2)
+    }
+
+    private fun parseGtfsTimeToTodayEpochMs(timeStr: String): Long {
+        val nowMs = System.currentTimeMillis()
+        if (timeStr.isBlank()) return nowMs
+        if (timeStr.contains("T") || timeStr.endsWith("Z")) {
+            return parseIsoTimestampToEpochMs(timeStr, nowMs)
+        }
+        return runCatching {
+            val parts = timeStr.trim().split(":")
+            val rawH = parts.getOrNull(0)?.toIntOrNull() ?: 0
+            val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+            val s = parts.getOrNull(2)?.toIntOrNull() ?: 0
+            val dayOffset = rawH / 24
+            val h = rawH % 24
+            val pragueZone = ZoneId.of("Europe/Prague")
+            val nowZdt = ZonedDateTime.now(pragueZone)
+            val zdt = nowZdt.plusDays(dayOffset.toLong())
+                .withHour(h)
+                .withMinute(m)
+                .withSecond(s)
+                .withNano(0)
+            zdt.toInstant().toEpochMilli()
+        }.getOrDefault(nowMs)
+    }
+
+    private fun formatEpochMsToHHmm(epochMs: Long): String {
+        val zdt = Instant.ofEpochMilli(epochMs).atZone(ZoneId.of("Europe/Prague"))
+        return String.format("%02d:%02d", zdt.hour, zdt.minute)
     }
 }
