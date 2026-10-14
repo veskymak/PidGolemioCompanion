@@ -1,6 +1,7 @@
 package cz.pid.golemiocompanion.data.repository
 
 import cz.pid.golemiocompanion.data.remote.api.GolemioApiService
+import cz.pid.golemiocompanion.data.remote.dto.*
 import cz.pid.golemiocompanion.domain.model.*
 import cz.pid.golemiocompanion.domain.repository.GolemioRepository
 import kotlinx.coroutines.CancellationException
@@ -33,7 +34,6 @@ class GolemioRepositoryImpl(
 
         if (labSettings.golemioApiKey.isNotBlank()) {
             val candidateStops = resolveStopQueries(stopQuery.trim().ifBlank { "Anděl" })
-            var response: PidDepartureBoardResponseDto? = null
             var lastError: Throwable? = null
 
             for (candidate in candidateStops) {
@@ -42,9 +42,47 @@ class GolemioRepositoryImpl(
                         apiKey = labSettings.golemioApiKey,
                         stopNames = listOf(candidate)
                     )
+
+                    // If the API returned anything useful, build and return the result immediately
                     if (res.departures.isNotEmpty() || res.stops.isNotEmpty()) {
-                        response = res
-                        break
+                        val stopsById = res.stops.associateBy { it.stopId }
+                        val primaryStop = res.stops.firstOrNull()
+
+                        return res.departures.map { dto ->
+                            val depStop = stopsById[dto.stop.id] ?: primaryStop
+                            val scheduledMs = parseIsoTimestampToEpochMs(dto.departureTimestamp.scheduled, nowMs + 90_000L)
+                            val officialDelaySec = dto.delay?.seconds ?: ((dto.delay?.minutes ?: 0) * 60)
+                            val predictedMs = parseIsoTimestampToEpochMs(
+                                dto.departureTimestamp.predicted,
+                                scheduledMs + (officialDelaySec * 1000L)
+                            )
+                            val scheduledDestMs = scheduledMs + (18 * 60 * 1000L)
+                            val predictedDestMs = predictedMs + (18 * 60 * 1000L) + (phantomExtraSeconds * 1000L)
+
+                            StopConnection(
+                                tripId = dto.trip.id.ifBlank { "PID_${dto.route.shortName}_${scheduledMs}" },
+                                routeShortName = dto.route.shortName,
+                                routeType = dto.route.type,
+                                headsign = dto.trip.headsign,
+                                stopName = depStop?.stopName?.ifBlank { null } ?: stopQuery,
+                                platformCode = dto.stop.platformCode ?: depStop?.platformCode ?: "-",
+                                stopLat = depStop?.stopLat ?: 50.0715,
+                                stopLon = depStop?.stopLon ?: 14.4035,
+                                scheduledDepartureEpochMs = scheduledMs,
+                                predictedDepartureEpochMs = predictedMs,
+                                scheduledArrivalDestinationEpochMs = scheduledDestMs,
+                                predictedArrivalDestinationEpochMs = predictedDestMs,
+                                destinationName = dto.lastStop?.name ?: dto.trip.headsign,
+                                officialDelaySeconds = officialDelaySec,
+                                phantomAiExtraDelaySeconds = phantomExtraSeconds,
+                                isAirConditioned = dto.trip.isAirConditioned ?: true,
+                                isWheelchairAccessible = dto.trip.isWheelchairAccessible
+                            )
+                        }
+                            .distinctBy { it.tripId }
+                            .filter { conn ->
+                                lineFilter.isNullOrBlank() || conn.routeShortName.equals(lineFilter.trim(), ignoreCase = true)
+                            }
                     }
                 } catch (e: HttpException) {
                     lastError = e
@@ -67,53 +105,14 @@ class GolemioRepositoryImpl(
                 }
             }
 
-            if (response == null) {
-                val isRegional = candidateStops.any { it.contains("Boleslav") }
-                val errorMsg = if (isRegional) {
-                    "Zastávka „${stopQuery.trim()}“ nebyla v PID nalezena. V Mladé Boleslavi zkuste zadat „Mladá Boleslav, aut.st.“ nebo „Mladá Boleslav, žel.st.“."
-                } else {
-                    "Zastávka „${stopQuery.trim()}“ nebyla v PID nalezena. Zadejte přesný název zastávky."
-                }
-                throw GolemioApiException(errorMsg, lastError)
+            // If none of the candidates returned a useful response, fail with a user-friendly message
+            val isRegional = candidateStops.any { it.contains("Boleslav") }
+            val errorMsg = if (isRegional) {
+                "Zastávka „${stopQuery.trim()}“ nebyla v PID nalezena. V Mladé Boleslavi zkuste zadat „Mladá Boleslav, aut.st.“ nebo „Mladá Boleslav, žel.st.“."
+            } else {
+                "Zastávka „${stopQuery.trim()}“ nebyla v PID nalezena. Zadejte přesný název zastávky."
             }
-
-            val stopsById = response.stops.associateBy { it.stopId }
-            val primaryStop = response.stops.firstOrNull()
-            return response.departures.map { dto ->
-                val depStop = stopsById[dto.stop.id] ?: primaryStop
-                val scheduledMs = parseIsoTimestampToEpochMs(dto.departureTimestamp.scheduled, nowMs + 90_000L)
-                val officialDelaySec = dto.delay?.seconds ?: ((dto.delay?.minutes ?: 0) * 60)
-                val predictedMs = parseIsoTimestampToEpochMs(
-                    dto.departureTimestamp.predicted,
-                    scheduledMs + (officialDelaySec * 1000L)
-                )
-                val scheduledDestMs = scheduledMs + (18 * 60 * 1000L)
-                val predictedDestMs = predictedMs + (18 * 60 * 1000L) + (phantomExtraSeconds * 1000L)
-
-                StopConnection(
-                    tripId = dto.trip.id.ifBlank { "PID_${dto.route.shortName}_${scheduledMs}" },
-                    routeShortName = dto.route.shortName,
-                    routeType = dto.route.type,
-                    headsign = dto.trip.headsign,
-                    stopName = depStop?.stopName?.ifBlank { null } ?: stopQuery,
-                    platformCode = dto.stop.platformCode ?: depStop?.platformCode ?: "-",
-                    stopLat = depStop?.stopLat ?: 50.0715,
-                    stopLon = depStop?.stopLon ?: 14.4035,
-                    scheduledDepartureEpochMs = scheduledMs,
-                    predictedDepartureEpochMs = predictedMs,
-                    scheduledArrivalDestinationEpochMs = scheduledDestMs,
-                    predictedArrivalDestinationEpochMs = predictedDestMs,
-                    destinationName = dto.lastStop?.name ?: dto.trip.headsign,
-                    officialDelaySeconds = officialDelaySec,
-                    phantomAiExtraDelaySeconds = phantomExtraSeconds,
-                    isAirConditioned = dto.trip.isAirConditioned ?: true,
-                    isWheelchairAccessible = dto.trip.isWheelchairAccessible
-                )
-            }
-                .distinctBy { it.tripId }
-                .filter { conn ->
-                    lineFilter.isNullOrBlank() || conn.routeShortName.equals(lineFilter.trim(), ignoreCase = true)
-                }
+            throw GolemioApiException(errorMsg, lastError)
         }
 
         // Demo data – used only when no Golemio API key is configured.
