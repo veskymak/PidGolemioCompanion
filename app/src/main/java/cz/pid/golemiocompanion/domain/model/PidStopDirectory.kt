@@ -20,43 +20,43 @@ object PidStopDirectory {
             subtitle = "Mladá Boleslav centrum"
         ),
         PidStopSuggestion(
-            name = "Mladá Boleslav, aut. st.",
+            name = "Mladá Boleslav,aut.st.",
             icon = "🚌",
             typeDescription = "Autobusové nádraží • Regionální a dálkové linky",
             subtitle = "Mladá Boleslav"
         ),
         PidStopSuggestion(
-            name = "Mladá Boleslav, hl.nádr.",
+            name = "Mladá Boleslav,hl.nádr.",
             icon = "🚆",
             typeDescription = "Hlavní nádraží • Vlaky ČD & Arriva, přestup bus",
             subtitle = "Mladá Boleslav"
         ),
         PidStopSuggestion(
-            name = "Mladá Boleslav, Václava Klementa",
+            name = "Mladá Boleslav,Václava Klementa",
             icon = "🚌",
             typeDescription = "Zastávka MHD & příměstské busy • Škoda Auto Muzeum",
             subtitle = "Mladá Boleslav"
         ),
         PidStopSuggestion(
-            name = "Mladá Boleslav, nám. Republiky",
+            name = "Mladá Boleslav,nám.Republiky",
             icon = "🚌",
             typeDescription = "Zastávka MHD • Náměstí Republiky",
             subtitle = "Mladá Boleslav"
         ),
         PidStopSuggestion(
-            name = "Mladá Boleslav, U Sportu",
+            name = "Mladá Boleslav,U Sportu",
             icon = "🚌",
             typeDescription = "Zastávka MHD • Městský stadion",
             subtitle = "Mladá Boleslav"
         ),
         PidStopSuggestion(
-            name = "Mladá Boleslav, Kosmonosy",
+            name = "Mladá Boleslav,Kosmonosy",
             icon = "🚌",
             typeDescription = "Zastávka MHD a příměstské linky",
             subtitle = "Mladá Boleslav / Kosmonosy"
         ),
         PidStopSuggestion(
-            name = "Mladá Boleslav, Sahara",
+            name = "Mladá Boleslav,Sahara",
             icon = "🚌",
             typeDescription = "Zastávka MHD",
             subtitle = "Mladá Boleslav"

@@ -96,6 +96,15 @@ fun MeteoAirQualityGlassCard(
     }
 }
 
+sealed interface CountdownDisplayState {
+    data class StatusPhrase(val phrase: String) : CountdownDisplayState
+    data class Time(
+        val isNegative: Boolean,
+        val minutes: String,
+        val seconds: String
+    ) : CountdownDisplayState
+}
+
 @Composable
 fun ActiveTripCountdownGlassPanel(
     trackingMode: TripTrackingMode,
@@ -122,17 +131,21 @@ fun ActiveTripCountdownGlassPanel(
     val isBoarded = trackingMode is TripTrackingMode.BoardedCountingToDestination
     val isWaitingNegative = trackingMode is TripTrackingMode.WaitingInNegativeTime
 
-    val formattedTime by remember(remainingSeconds, isBoarded) {
+    val countdownDisplay by remember(remainingSeconds, isBoarded) {
         derivedStateOf {
             if (remainingSeconds in -180L..0L && !isBoarded) {
-                if (remainingSeconds in -45L..0L) "< 1 min" else "PŘÍJEZD"
+                val phrase = if (remainingSeconds in -45L..0L) "< 1 min" else "PŘÍJEZD"
+                CountdownDisplayState.StatusPhrase(phrase)
             } else {
                 val isNegative = remainingSeconds < 0
                 val absSec = abs(remainingSeconds)
                 val mins = absSec / 60
                 val secs = absSec % 60
-                val prefix = if (isNegative) "-" else ""
-                String.format("%s%02d:%02d", prefix, mins, secs)
+                CountdownDisplayState.Time(
+                    isNegative = isNegative,
+                    minutes = String.format("%02d", mins),
+                    seconds = String.format("%02d", secs)
+                )
             }
         }
     }
@@ -233,39 +246,137 @@ fun ActiveTripCountdownGlassPanel(
 
         Spacer(modifier = Modifier.height(6.dp))
 
+        val timerColor = when {
+            isWaitingNegative -> Color(0xFFFBBF24)
+            isBoarded -> Color(0xFF4ADE80)
+            remainingSeconds in -180L..0L -> Color(0xFF38BDF8)
+            remainingSeconds < -180L -> Color(0xFFF87171)
+            else -> Color.White
+        }
+
         Box(
             modifier = Modifier.graphicsLayer {
                 scaleX = pulseScale
                 scaleY = pulseScale
-            }
+            },
+            contentAlignment = Alignment.Center
         ) {
-            AnimatedContent(
-                targetState = formattedTime,
-                transitionSpec = {
-                    (slideInVertically(
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMediumLow
+            when (val display = countdownDisplay) {
+                is CountdownDisplayState.StatusPhrase -> {
+                    AnimatedContent(
+                        targetState = display.phrase,
+                        transitionSpec = {
+                            (slideInVertically(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            ) { height -> height / 3 } + fadeIn()).togetherWith(
+                                slideOutVertically(
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                ) { height -> -height / 3 } + fadeOut()
+                            )
+                        },
+                        label = "StatusPhraseTicker"
+                    ) { targetText ->
+                        Text(
+                            text = targetText,
+                            color = timerColor,
+                            fontSize = 42.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
                         )
-                    ) { height -> height / 3 } + fadeIn()).togetherWith(
-                        slideOutVertically { height -> -height / 3 } + fadeOut()
-                    )
-                },
-                label = "DigitTicker120Hz"
-            ) { targetText ->
-                Text(
-                    text = targetText,
-                    color = when {
-                        isWaitingNegative -> Color(0xFFFBBF24)
-                        isBoarded -> Color(0xFF4ADE80)
-                        remainingSeconds in -180L..0L -> Color(0xFF38BDF8)
-                        remainingSeconds < -180L -> Color(0xFFF87171)
-                        else -> Color.White
-                    },
-                    fontSize = if (targetText.length > 5) 42.sp else 64.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace
-                )
+                    }
+                }
+                is CountdownDisplayState.Time -> {
+                    val fontSize = if (display.minutes.length > 2) 52.sp else 64.sp
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        if (display.isNegative) {
+                            Text(
+                                text = "-",
+                                color = timerColor,
+                                fontSize = fontSize,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        // Minuty se animují POUZE když se změní hodnota minut
+                        AnimatedContent(
+                            targetState = display.minutes,
+                            transitionSpec = {
+                                (slideInVertically(
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                ) { height -> height / 3 } + fadeIn()).togetherWith(
+                                    slideOutVertically(
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    ) { height -> -height / 3 } + fadeOut()
+                                )
+                            },
+                            contentAlignment = Alignment.Center,
+                            label = "MinutesTicker"
+                        ) { minText ->
+                            Text(
+                                text = minText,
+                                color = timerColor,
+                                fontSize = fontSize,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        // Dvojtečka je statická – zůstává pevně na místě a nehýbe se každou vteřinu
+                        Text(
+                            text = ":",
+                            color = timerColor,
+                            fontSize = fontSize,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
+
+                        // Vteřiny se animují každou vteřinu
+                        AnimatedContent(
+                            targetState = display.seconds,
+                            transitionSpec = {
+                                (slideInVertically(
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                ) { height -> height / 3 } + fadeIn()).togetherWith(
+                                    slideOutVertically(
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    ) { height -> -height / 3 } + fadeOut()
+                                )
+                            },
+                            contentAlignment = Alignment.Center,
+                            label = "SecondsTicker"
+                        ) { secText ->
+                            Text(
+                                text = secText,
+                                color = timerColor,
+                                fontSize = fontSize,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
             }
         }
 

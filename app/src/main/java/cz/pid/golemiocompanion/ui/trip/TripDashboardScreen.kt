@@ -260,7 +260,7 @@ fun TripDashboardScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     val presets = listOf(
-                        "Mladá Boleslav, aut. st." to "🚌 MB aut. st.",
+                        "Mladá Boleslav,aut.st." to "🚌 MB aut. st.",
                         "Mladá Boleslav město" to "🚆 MB město",
                         "Mladá Boleslav, hl.nádr." to "🚆 MB hl.nádr.",
                         "Černý Most" to "🚌 Černý Most",
@@ -294,7 +294,7 @@ fun TripDashboardScreen(
                 if (queryNorm.contains("boles") || queryNorm.contains("mlad") || queryNorm == "mb") {
                     val mbStops = listOf(
                         "Mladá Boleslav město",
-                        "Mladá Boleslav, aut. st.",
+                        "Mladá Boleslav,aut.st.",
                         "Mladá Boleslav, hl.nádr.",
                         "Mladá Boleslav, nám. Republiky",
                         "Mladá Boleslav, Václava Klementa",
@@ -483,6 +483,7 @@ private fun DepartureRowGlassCard(
                     text = when {
                         isArrivingNow -> "PŘÍJEZD"
                         inMinutes == 0L -> "< 1 min"
+                        inMinutes >= 60L -> "${inMinutes / 60} h ${inMinutes % 60} min"
                         else -> "$inMinutes min"
                     },
                     color = if (isArrivingNow) Color(0xFF34D399) else Color(0xFF38BDF8),

@@ -12,6 +12,7 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.*
 
@@ -51,10 +52,10 @@ class GolemioRepositoryImpl(
                 try {
                     val res = apiService.getDepartureBoards(
                         apiKey = labSettings.golemioApiKey,
-                        stopNames = listOf(candidate)
+                        stopName = candidate
                     )
 
-                    if (res.departures.isNotEmpty() || res.stops.isNotEmpty()) {
+                    if (res.departures.isNotEmpty()) {
                         val stopsById = res.stops.associateBy { it.stopId }
                         val primaryStop = res.stops.firstOrNull()
 
@@ -137,121 +138,133 @@ class GolemioRepositoryImpl(
                 return emptyList()
             }
 
-            // If none of the candidates returned live departures from API (e.g. late evening/night or outside Prague tracking),
-            // fallback gracefully to scheduled connections for known stops instead of throwing a false "nebyla nalezena" error!
-            val isKnownMb = candidateStops.any { it.contains("Boleslav", ignoreCase = true) } || stopQuery.contains("boleslav", ignoreCase = true) || stopQuery.contains("mlad", ignoreCase = true)
-            if (isKnownMb) {
-                val cleanStop = stopQuery.ifBlank { "Mladá Boleslav, aut. st." }
-                val isTrain = cleanStop.contains("město", ignoreCase = true) || cleanStop.contains("mesto", ignoreCase = true) || cleanStop.contains("hl.nádr", ignoreCase = true)
-                val baseLines = if (isTrain) {
-                    listOf(
-                        Triple("S30", "Praha hl.n. (přes Všetaty)", "1"),
-                        Triple("R43", "Praha Masarykovo n.", "2"),
-                        Triple("S31", "Nymburk hl.n.", "1"),
-                        Triple("S30", "Turnov", "2"),
-                        Triple("412", "Praha, Černý Most (Expres)", "1"),
-                        Triple("467", "Mělník, žel.st.", "3")
-                    )
-                } else {
-                    listOf(
-                        Triple("412", "Praha, Černý Most (Expres)", "1"),
-                        Triple("467", "Mělník, žel.st.", "3"),
-                        Triple("715", "Bělá pod Bezdězem, nám.", "4"),
-                        Triple("720", "Mnichovo Hradiště, nám.", "2"),
-                        Triple("412", "Praha, Černý Most", "1"),
-                        Triple("722", "Dolní Bousov, nám.", "5")
-                    )
-                }
-                val offsetsSeconds = listOf(60L, 240L, 540L, 900L, 1440L, 2100L)
-                val delaysSeconds = listOf(0, 45, 0, 15, 0, 30)
-                val stopLat = 50.4114
-                val stopLon = 14.9032
-                val displayStopName = if (!cleanStop.contains(",") && !cleanStop.contains("město", ignoreCase = true)) "Mladá Boleslav, aut. st." else cleanStop
-
-                val scheduledMb = baseLines.mapIndexed { idx, (line, headsign, platform) ->
-                    val schedMs = nowMs + (offsetsSeconds[idx] * 1000L)
-                    val predMs = schedMs + (delaysSeconds[idx] * 1000L)
-                    StopConnection(
-                        tripId = "PID_${line}_${idx}_SCHED",
-                        routeShortName = line,
-                        routeType = if (line.startsWith("S") || line.startsWith("R")) 2 else 3,
-                        headsign = headsign,
-                        stopName = displayStopName,
-                        platformCode = platform,
-                        stopLat = stopLat,
-                        stopLon = stopLon,
-                        scheduledDepartureEpochMs = schedMs,
-                        predictedDepartureEpochMs = predMs,
-                        scheduledArrivalDestinationEpochMs = schedMs + (18 * 60_000L),
-                        predictedArrivalDestinationEpochMs = predMs + (18 * 60_000L) + (phantomExtraSeconds * 1000L),
-                        destinationName = headsign,
-                        officialDelaySeconds = delaysSeconds[idx],
-                        phantomAiExtraDelaySeconds = phantomExtraSeconds,
-                        isAirConditioned = true,
-                        isWheelchairAccessible = true
-                    )
-                }.filter { lineFilter.isNullOrBlank() || it.routeShortName.equals(lineFilter.trim(), ignoreCase = true) }
-
-                departuresCache[cacheKey] = Pair(nowMs, scheduledMb)
-                return scheduledMb
-            }
-
+            // In API mode, if Golemio returned 0 departures for all candidate stops,
+            // return empty list so the app displays the actual state instead of fabricating fake buses.
             return emptyList()
         }
 
-        // Demo data – used only when no Golemio API key is configured.
+        // Demo / offline data – realistic GTFS timetable schedule based on Prague time
         val cleanStop = stopQuery.ifBlank { "Anděl" }
         val isMb = cleanStop.contains("boleslav", ignoreCase = true) || cleanStop.contains("mlad", ignoreCase = true)
+        val isTrain = cleanStop.contains("město", ignoreCase = true) || cleanStop.contains("mesto", ignoreCase = true) ||
+            cleanStop.contains("hl.nádr", ignoreCase = true) || cleanStop.contains("hl.n", ignoreCase = true)
 
-        val baseLines = if (isMb) {
-            listOf(
-                Triple("412", "Praha, Černý Most (Expres)", "1"),
-                Triple("467", "Mělník, žel.st.", "3"),
-                Triple("715", "Bělá pod Bezdězem, nám.", "4"),
-                Triple("720", "Mnichovo Hradiště, nám.", "2"),
-                Triple("412", "Praha, Černý Most", "1"),
-                Triple("722", "Dolní Bousov, nám.", "5")
-            )
-        } else {
-            listOf(
-                Triple("191", "Letiště Václava Havla", "B"),
-                Triple("167", "Nemocnice Na Homolce", "A"),
-                Triple("125", "Smíchovské nádraží → Skalka", "C"),
-                Triple("9", "Spojovací", "1"),
-                Triple("191", "Letiště Václava Havla (Následující spoj)", "B"),
-                Triple("20", "Dědina", "2")
-            )
+        val pragueZone = ZoneId.of("Europe/Prague")
+        val nowZdt = ZonedDateTime.now(pragueZone)
+        val nowHour = nowZdt.hour
+        val nowMinute = nowZdt.minute
+
+        data class TimetableItem(
+            val line: String,
+            val headsign: String,
+            val platform: String,
+            val hour: Int,
+            val minute: Int,
+            val routeType: Int = 3
+        )
+
+        val timetableItems: List<TimetableItem> = when {
+            isMb && isTrain -> {
+                listOf(
+                    TimetableItem("S30", "Praha hl.n. (přes Všetaty)", "1", (nowHour + 1) % 24, 12, routeType = 2),
+                    TimetableItem("R43", "Praha Masarykovo n.", "2", (nowHour + 1) % 24, 42, routeType = 2),
+                    TimetableItem("S31", "Nymburk hl.n.", "1", (nowHour + 2) % 24, 8, routeType = 2),
+                    TimetableItem("S30", "Turnov", "2", (nowHour + 2) % 24, 35, routeType = 2)
+                )
+            }
+            isMb && !isTrain -> {
+                if (nowHour >= 21 || nowHour < 5) {
+                    // Reálný noční jízdní řád Mladá Boleslav, aut.st. z PID Lítačka:
+                    // V noci jede pouze 315 ve 23:25 a další spoje až brzy ráno (od 1:10)
+                    listOf(
+                        TimetableItem("315", "Mnichovo Hradiště,dopravní terminál", "7", 23, 25),
+                        TimetableItem("345", "Liberec,aut.nádr.", "27", 1, 10),
+                        TimetableItem("315", "Černý Most", "8", 4, 10),
+                        TimetableItem("315", "Mnichovo Hradiště,dopravní terminál", "7", 4, 30),
+                        TimetableItem("345", "Černý Most", "8", 4, 35),
+                        TimetableItem("315", "Černý Most", "8", 4, 40),
+                        TimetableItem("315", "Mnichovo Hradiště,dopravní terminál", "7", 4, 55),
+                        TimetableItem("712", "Katusice", "2", 5, 5),
+                        TimetableItem("412", "Černý Most", "8", 5, 10),
+                        TimetableItem("763", "Mladá Boleslav,Zalužany ŠKODA", "3", 5, 14)
+                    )
+                } else {
+                    // Denní jízdní řád Mladá Boleslav, aut.st. (pravidelné denní spoje)
+                    listOf(
+                        TimetableItem("412", "Praha, Černý Most (Expres)", "8", nowHour, (nowMinute + 12) % 60),
+                        TimetableItem("315", "Mnichovo Hradiště,dopravní terminál", "7", nowHour, (nowMinute + 25) % 60),
+                        TimetableItem("345", "Liberec,aut.nádr.", "27", nowHour, (nowMinute + 38) % 60),
+                        TimetableItem("467", "Mělník, žel.st.", "3", (nowHour + 1) % 24, (nowMinute + 5) % 60),
+                        TimetableItem("715", "Bělá pod Bezdězem, nám.", "4", (nowHour + 1) % 24, (nowMinute + 20) % 60),
+                        TimetableItem("720", "Mnichovo Hradiště, nám.", "2", (nowHour + 1) % 24, (nowMinute + 35) % 60),
+                        TimetableItem("722", "Dolní Bousov, nám.", "5", (nowHour + 1) % 24, (nowMinute + 50) % 60)
+                    )
+                }
+            }
+            else -> {
+                // Praha (Anděl a ostatní stanice)
+                if (nowHour >= 24 || nowHour < 5) {
+                    listOf(
+                        TimetableItem("98", "Spojovací", "1", nowHour, (nowMinute + 14) % 60, routeType = 0),
+                        TimetableItem("99", "Nádraží Hostivař", "2", nowHour, (nowMinute + 29) % 60, routeType = 0),
+                        TimetableItem("904", "Sídliště Stodůlky", "A", (nowHour + 1) % 24, (nowMinute + 10) % 60),
+                        TimetableItem("907", "Přední Kopanina", "B", (nowHour + 1) % 24, (nowMinute + 40) % 60)
+                    )
+                } else {
+                    listOf(
+                        TimetableItem("9", "Spojovací", "1", nowHour, (nowMinute + 4) % 60, routeType = 0),
+                        TimetableItem("20", "Dědina", "2", nowHour, (nowMinute + 9) % 60, routeType = 0),
+                        TimetableItem("191", "Letiště Václava Havla", "B", nowHour, (nowMinute + 14) % 60),
+                        TimetableItem("167", "Nemocnice Na Homolce", "A", nowHour, (nowMinute + 21) % 60),
+                        TimetableItem("125", "Smíchovské nádraží → Skalka", "C", nowHour, (nowMinute + 31) % 60)
+                    )
+                }
+            }
         }
 
-        val offsetsSeconds = listOf(18L, 75L, 190L, 310L, 480L, 640L)
-        val delaysSeconds = listOf(12, 45, 0, 95, 15, 0)
         val stopLat = if (isMb) 50.4114 else 50.0715
         val stopLon = if (isMb) 14.9032 else 14.4035
-        val displayStopName = if (isMb && !cleanStop.contains(",")) "Mladá Boleslav, aut.st." else cleanStop
+        val displayStopName = if (isMb && !cleanStop.contains(",")) "Mladá Boleslav,aut.st." else cleanStop
 
-        return baseLines.mapIndexed { idx, (line, headsign, platform) ->
-            val schedMs = nowMs + (offsetsSeconds[idx] * 1000L) - (delaysSeconds[idx] * 1000L)
-            val predMs = nowMs + (offsetsSeconds[idx] * 1000L)
+        val generatedConnections = timetableItems.mapNotNull { item ->
+            val depZdt = if (item.hour < nowHour || (item.hour == nowHour && item.minute < nowMinute)) {
+                // Spoj jede až následující den (např. 01:10 ráno, když je 22:52)
+                nowZdt.plusDays(1).withHour(item.hour).withMinute(item.minute).withSecond(0).withNano(0)
+            } else {
+                // Spoj jede ještě dnes
+                nowZdt.withHour(item.hour).withMinute(item.minute).withSecond(0).withNano(0)
+            }
+            val schedMs = depZdt.toInstant().toEpochMilli()
+            val diffMs = schedMs - nowMs
+
+            // Vyfiltrovat spoje, které by byly mimo časové okno (v minulosti nebo za více než 14 hodin)
+            if (diffMs < -60_000L || diffMs > 14 * 3600 * 1000L) return@mapNotNull null
+
             StopConnection(
-                tripId = "PID_${line}_${idx}",
-                routeShortName = line,
-                routeType = if (line.length <= 2) 0 else 3,
-                headsign = headsign,
+                tripId = "PID_TT_${item.line}_${item.hour}_${item.minute}",
+                routeShortName = item.line,
+                routeType = item.routeType,
+                headsign = item.headsign,
                 stopName = displayStopName,
-                platformCode = platform,
+                platformCode = item.platform,
                 stopLat = stopLat,
                 stopLon = stopLon,
                 scheduledDepartureEpochMs = schedMs,
-                predictedDepartureEpochMs = predMs,
-                scheduledArrivalDestinationEpochMs = schedMs + (14 * 60_000L),
-                predictedArrivalDestinationEpochMs = predMs + (14 * 60_000L) + (phantomExtraSeconds * 1000L),
-                destinationName = headsign.substringBefore(" ("),
-                officialDelaySeconds = delaysSeconds[idx],
-                phantomAiExtraDelaySeconds = phantomExtraSeconds
+                predictedDepartureEpochMs = schedMs,
+                scheduledArrivalDestinationEpochMs = schedMs + (22 * 60_000L),
+                predictedArrivalDestinationEpochMs = schedMs + (22 * 60_000L) + (phantomExtraSeconds * 1000L),
+                destinationName = item.headsign.substringBefore(" ("),
+                officialDelaySeconds = 0,
+                phantomAiExtraDelaySeconds = phantomExtraSeconds,
+                isAirConditioned = true,
+                isWheelchairAccessible = true
             )
-        }.filter { conn ->
-            lineFilter.isNullOrBlank() || conn.routeShortName.contains(lineFilter.trim(), ignoreCase = true)
+        }.sortedBy { it.scheduledDepartureEpochMs }
+        .filter { conn ->
+            lineFilter.isNullOrBlank() || conn.routeShortName.equals(lineFilter.trim(), ignoreCase = true)
         }
+
+        return generatedConnections
     }
 
     override suspend fun getAirQualityAndWeather(
@@ -678,16 +691,20 @@ class GolemioRepositoryImpl(
         }
         if (clean.equals("Mladá Boleslav, aut. st.", ignoreCase = true) ||
             clean.equals("Mladá Boleslav, aut.st.", ignoreCase = true) ||
-            clean.equals("MB aut. st.", ignoreCase = true)) {
-            return listOf("Mladá Boleslav, aut. st.", "Mladá Boleslav, aut.st.", "Mladá Boleslav")
+            clean.equals("Mladá Boleslav,aut.st.", ignoreCase = true) ||
+            clean.equals("MB aut. st.", ignoreCase = true) ||
+            clean.equals("MB aut.st.", ignoreCase = true)) {
+            return listOf("Mladá Boleslav,aut.st.", "Mladá Boleslav, aut. st.", "Mladá Boleslav")
         }
         if (clean.equals("Mladá Boleslav, hl.nádr.", ignoreCase = true) ||
+            clean.equals("Mladá Boleslav,hl.nádr.", ignoreCase = true) ||
             clean.equals("Mladá Boleslav, žel.st.", ignoreCase = true) ||
             clean.equals("MB hl.nádr.", ignoreCase = true)) {
-            return listOf("Mladá Boleslav, hl.nádr.", "Mladá Boleslav")
+            return listOf("Mladá Boleslav,hl.nádr.", "Mladá Boleslav, hl.nádr.", "Mladá Boleslav")
         }
-        if (clean.equals("Mladá Boleslav, nám. Republiky", ignoreCase = true)) {
-            return listOf("Mladá Boleslav, nám. Republiky")
+        if (clean.equals("Mladá Boleslav, nám. Republiky", ignoreCase = true) ||
+            clean.equals("Mladá Boleslav,nám.Republiky", ignoreCase = true)) {
+            return listOf("Mladá Boleslav,nám.Republiky", "Mladá Boleslav, nám. Republiky")
         }
         if (clean.equals("Praha hl.n.", ignoreCase = true) || clean.equals("Hlavní nádraží", ignoreCase = true)) {
             return listOf("Praha hl.n.", "Hlavní nádraží")
@@ -701,15 +718,17 @@ class GolemioRepositoryImpl(
             if (normalized.contains("mesto")) {
                 list.add("Mladá Boleslav město")
             } else if (normalized.contains("zel") || normalized.contains("vlak") || normalized.contains("hl") || normalized.contains("nadr")) {
+                list.add("Mladá Boleslav,hl.nádr.")
                 list.add("Mladá Boleslav, hl.nádr.")
             } else if (normalized.contains("aut") || normalized.contains("bus") || normalized.contains("st")) {
+                list.add("Mladá Boleslav,aut.st.")
                 list.add("Mladá Boleslav, aut. st.")
             } else {
+                list.add("Mladá Boleslav,aut.st.")
                 list.add("Mladá Boleslav město")
-                list.add("Mladá Boleslav, aut. st.")
             }
-        } else if (clean.contains("aut.st", ignoreCase = true)) {
-            list.add(clean.replace("aut.st.", "aut. st.", ignoreCase = true))
+        } else if (clean.contains("aut. st", ignoreCase = true)) {
+            list.add(clean.replace("aut. st.", "aut.st.", ignoreCase = true))
         } else if (clean.contains("žel.st", ignoreCase = true) || clean.contains("zel.st", ignoreCase = true)) {
             list.add(clean.replace("žel.st.", "hl.nádr.", ignoreCase = true))
         }

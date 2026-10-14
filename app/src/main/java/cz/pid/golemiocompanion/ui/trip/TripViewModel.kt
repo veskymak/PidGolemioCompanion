@@ -156,7 +156,7 @@ class TripViewModel(
                     if (currentState.lineFilterQuery.isNotBlank()) {
                         "Pro zastávku „${currentState.stopSearchQuery}“ s filtrem linky „${currentState.lineFilterQuery}“ nebyly nalezeny žádné odjezdy."
                     } else {
-                        "Pro zastávku „${currentState.stopSearchQuery}“ nejsou v příští hodině žádné odjezdy."
+                        "Pro zastávku „${currentState.stopSearchQuery}“ nejsou v nejbližších hodinách žádné odjezdy."
                     }
                 } else null
 
