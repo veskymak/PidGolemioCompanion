@@ -279,7 +279,7 @@ class TripViewModel(
         mapPollingJob = viewModelScope.launch {
             while (isActive) {
                 refreshMapLayersNow()
-                val intervalMs = if (labSettingsFlow.value.rawInputGatewayStream) 2500L else 6000L
+                val intervalMs = if (labSettingsFlow.value.rawInputGatewayStream) 4000L else 15000L
                 delay(intervalMs)
             }
         }
@@ -290,8 +290,14 @@ class TripViewModel(
             val lab = currentLabSettings()
             val filter = _uiState.value.mapLineFilter
             val vehiclesDeferred = async { repository.getLiveVehicles(filter, lab) }
-            val parkingsDeferred = async { repository.getParkingsPR(lab.golemioApiKey) }
-            val bikesDeferred = async { repository.getNearbySharedBikes(50.0755, 14.4378, lab.golemioApiKey) }
+            val parkingsDeferred = async {
+                if (_uiState.value.parkingsPR.isEmpty()) repository.getParkingsPR(lab.golemioApiKey)
+                else _uiState.value.parkingsPR
+            }
+            val bikesDeferred = async {
+                if (_uiState.value.mapSharedBikes.isEmpty()) repository.getNearbySharedBikes(50.0755, 14.4378, lab.golemioApiKey)
+                else _uiState.value.mapSharedBikes
+            }
 
             _uiState.update {
                 it.copy(
@@ -355,7 +361,7 @@ class TripViewModel(
         val diffSec = (targetEpochMs - nowMs) / 1000L
         _remainingSecondsFlow.value = diffSec
 
-        if (mode is TripTrackingMode.CountingDownToDeparture && diffSec <= 0L) {
+        if (mode is TripTrackingMode.CountingDownToDeparture && diffSec <= -180L) {
             _uiState.update {
                 it.copy(trackingMode = TripTrackingMode.ReachedZeroActionPrompt(mode.connection))
             }

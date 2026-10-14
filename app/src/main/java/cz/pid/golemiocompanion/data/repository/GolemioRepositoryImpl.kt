@@ -8,8 +8,11 @@ import kotlinx.coroutines.CancellationException
 import retrofit2.HttpException
 import java.io.IOException
 import java.time.Instant
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.*
 
 /** Thrown when live Golemio data was requested (API key set) but could not be loaded. */
@@ -20,6 +23,7 @@ class GolemioRepositoryImpl(
 ) : GolemioRepository {
 
     private val lastKnownVehicleCache = mutableMapOf<String, LiveVehicleMarker>()
+    private val departuresCache = ConcurrentHashMap<String, Pair<Long, List<StopConnection>>>()
 
     override suspend fun getDeparturesForStop(
         stopQuery: String,
@@ -33,6 +37,12 @@ class GolemioRepositoryImpl(
         } else 0
 
         if (labSettings.golemioApiKey.isNotBlank()) {
+            val cacheKey = "${stopQuery.trim().lowercase()}|${lineFilter?.trim()?.lowercase() ?: ""}"
+            val cached = departuresCache[cacheKey]
+            if (cached != null && (nowMs - cached.first) < 20_000L) {
+                return cached.second
+            }
+
             val candidateStops = resolveStopQueries(stopQuery.trim().ifBlank { "Anděl" })
             var lastError: Throwable? = null
             var fallbackDeparturesWithoutFilter: List<StopConnection>? = null
@@ -52,10 +62,16 @@ class GolemioRepositoryImpl(
                             val depStop = stopsById[dto.stop.id] ?: primaryStop
                             val scheduledMs = parseIsoTimestampToEpochMs(dto.departureTimestamp.scheduled, nowMs + 90_000L)
                             val officialDelaySec = dto.delay?.seconds ?: ((dto.delay?.minutes ?: 0) * 60)
-                            val predictedMs = parseIsoTimestampToEpochMs(
-                                dto.departureTimestamp.predicted,
-                                scheduledMs + (officialDelaySec * 1000L)
-                            )
+                            
+                            val minutesNum = dto.departureTimestamp.minutes?.filter { it.isDigit() }?.toLongOrNull()
+                            val predictedMs = if (minutesNum != null) {
+                                nowMs + (minutesNum * 60_000L)
+                            } else {
+                                parseIsoTimestampToEpochMs(
+                                    dto.departureTimestamp.predicted,
+                                    scheduledMs + (officialDelaySec * 1000L)
+                                )
+                            }
                             val scheduledDestMs = scheduledMs + (18 * 60 * 1000L)
                             val predictedDestMs = predictedMs + (18 * 60 * 1000L) + (phantomExtraSeconds * 1000L)
 
@@ -85,6 +101,7 @@ class GolemioRepositoryImpl(
                         }
 
                         if (filtered.isNotEmpty()) {
+                            departuresCache[cacheKey] = Pair(nowMs, filtered)
                             return filtered
                         } else if (fallbackDeparturesWithoutFilter == null && mapped.isNotEmpty()) {
                             fallbackDeparturesWithoutFilter = mapped
@@ -92,11 +109,14 @@ class GolemioRepositoryImpl(
                     }
                 } catch (e: HttpException) {
                     lastError = e
-                    if (e.code() != 404) {
+                    if (e.code() == 429) {
+                        // Rate limit exceeded: return cached data if available
+                        if (cached != null) return cached.second
+                        throw GolemioApiException("Překročen limit požadavků Golemio API, zkuste to za chvíli.", e)
+                    } else if (e.code() != 404) {
                         throw GolemioApiException(
                             when (e.code()) {
                                 401, 403 -> "Neplatný API klíč Golemio (HTTP ${e.code()})."
-                                429 -> "Překročen limit požadavků Golemio API, zkuste to za chvíli."
                                 else -> "Chyba Golemio API (HTTP ${e.code()})."
                             },
                             e
@@ -105,6 +125,7 @@ class GolemioRepositoryImpl(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: IOException) {
+                    if (cached != null) return cached.second
                     throw GolemioApiException("Nelze se připojit ke Golemio API: ${e.message ?: "chyba sítě"}", e)
                 } catch (e: Exception) {
                     lastError = e
@@ -573,9 +594,11 @@ class GolemioRepositoryImpl(
         if (iso.isNullOrBlank()) return fallbackMs
         return runCatching {
             OffsetDateTime.parse(iso).toInstant().toEpochMilli()
-        }.getOrElse {
-            runCatching { Instant.parse(iso).toEpochMilli() }.getOrDefault(fallbackMs)
-        }
+        }.recoverCatching {
+            Instant.parse(iso).toEpochMilli()
+        }.recoverCatching {
+            LocalDateTime.parse(iso).atZone(ZoneId.of("Europe/Prague")).toInstant().toEpochMilli()
+        }.getOrDefault(fallbackMs)
     }
 
     private fun haversineMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Int {
@@ -594,65 +617,43 @@ class GolemioRepositoryImpl(
             .replace("\\p{InCombiningDiacriticalMarks}+".toRegex(), "")
             .lowercase()
 
-        val list = mutableListOf<String>()
+        // 1. Direct exact shortcuts: if user entered a specific known stop, return ONLY that one!
+        if (clean.equals("Mladá Boleslav, aut. st.", ignoreCase = true) ||
+            clean.equals("Mladá Boleslav, aut.st.", ignoreCase = true) ||
+            clean.equals("MB aut. st.", ignoreCase = true)) {
+            return listOf("Mladá Boleslav, aut. st.")
+        }
+        if (clean.equals("Mladá Boleslav, hl.nádr.", ignoreCase = true) ||
+            clean.equals("Mladá Boleslav, žel.st.", ignoreCase = true) ||
+            clean.equals("MB hl.nádr.", ignoreCase = true)) {
+            return listOf("Mladá Boleslav, hl.nádr.")
+        }
+        if (clean.equals("Mladá Boleslav, město", ignoreCase = true)) {
+            return listOf("Mladá Boleslav, město")
+        }
+        if (clean.equals("Mladá Boleslav, nám. Republiky", ignoreCase = true)) {
+            return listOf("Mladá Boleslav, nám. Republiky")
+        }
 
-        // 1. Raw input as first candidate
+        val list = mutableListOf<String>()
         list.add(clean)
 
-        // 2. Specific normalizations for Mladá Boleslav
+        // 2. Specific normalizations for Mladá Boleslav (at most 2 candidates to prevent 429)
         if (normalized.contains("boleslav") || normalized.contains("mlad") || normalized == "mb") {
             if (normalized.contains("zel") || normalized.contains("vlak") || normalized.contains("hl") || normalized.contains("nadr")) {
                 list.add("Mladá Boleslav, hl.nádr.")
-                list.add("Mladá Boleslav hl. n.")
-                list.add("Mladá Boleslav hl.n.")
-                list.add("Mladá Boleslav, hl.n.")
-                list.add("Mladá Boleslav, město")
-                list.add("Mladá Boleslav město")
-                list.add("Mladá Boleslav, aut. st.")
             } else if (normalized.contains("aut") || normalized.contains("bus") || normalized.contains("st")) {
                 list.add("Mladá Boleslav, aut. st.")
-                list.add("Mladá Boleslav, aut.st.")
-                list.add("Mladá Boleslav aut. st.")
-                list.add("Mladá Boleslav aut.st.")
-                list.add("Mladá Boleslav, hl.nádr.")
             } else {
                 list.add("Mladá Boleslav, aut. st.")
-                list.add("Mladá Boleslav, aut.st.")
                 list.add("Mladá Boleslav, hl.nádr.")
-                list.add("Mladá Boleslav hl. n.")
-                list.add("Mladá Boleslav, Václava Klementa")
-                list.add("Mladá Boleslav, nám. Republiky")
-                list.add("Mladá Boleslav, U Sportu")
             }
-        }
-
-        // Punctuation & space variations: "aut.st." <-> "aut. st."
-        if (clean.contains("aut.st", ignoreCase = true)) {
+        } else if (clean.contains("aut.st", ignoreCase = true)) {
             list.add(clean.replace("aut.st.", "aut. st.", ignoreCase = true))
-            list.add(clean.replace("aut.st", "aut. st.", ignoreCase = true))
-        }
-        if (clean.contains("aut. st", ignoreCase = true)) {
-            list.add(clean.replace("aut. st.", "aut.st.", ignoreCase = true))
-            list.add(clean.replace("aut. st", "aut.st.", ignoreCase = true))
-        }
-        if (clean.contains("žel.st", ignoreCase = true) || clean.contains("zel.st", ignoreCase = true)) {
+        } else if (clean.contains("žel.st", ignoreCase = true) || clean.contains("zel.st", ignoreCase = true)) {
             list.add(clean.replace("žel.st.", "hl.nádr.", ignoreCase = true))
-            list.add(clean.replace("žel.st", "hl.nádr.", ignoreCase = true))
-            list.add(clean.replace("žel.st.", "aut. st.", ignoreCase = true))
-        }
-        if (clean.contains("nám.Republiky", ignoreCase = true)) {
-            list.add(clean.replace("nám.Republiky", "nám. Republiky", ignoreCase = true))
         }
 
-        // 3. Fallbacks for other regional towns without comma
-        if (!clean.contains(",")) {
-            list.add("$clean, aut. st.")
-            list.add("$clean, aut.st.")
-            list.add("$clean, hl.nádr.")
-            list.add("$clean, žel.st.")
-            list.add("$clean, náměstí")
-        }
-
-        return list.distinct()
+        return list.distinct().take(2)
     }
 }

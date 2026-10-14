@@ -108,28 +108,6 @@ fun ActiveTripCountdownGlassPanel(
 ) {
     val remainingSeconds = remainingSecondsProvider()
 
-    val formattedTime by remember(remainingSeconds) {
-        derivedStateOf {
-            val isNegative = remainingSeconds < 0
-            val absSec = abs(remainingSeconds)
-            val mins = absSec / 60
-            val secs = absSec % 60
-            val prefix = if (isNegative) "-" else ""
-            String.format("%s%02d:%02d", prefix, mins, secs)
-        }
-    }
-
-    val showZeroActionCards by remember(trackingMode, remainingSeconds) {
-        derivedStateOf {
-            when (trackingMode) {
-                is TripTrackingMode.ReachedZeroActionPrompt -> true
-                is TripTrackingMode.CountingDownToDeparture -> remainingSeconds <= 0L
-                is TripTrackingMode.WaitingInNegativeTime -> true
-                else -> false
-            }
-        }
-    }
-
     val activeConnection: StopConnection? = when (trackingMode) {
         is TripTrackingMode.CountingDownToDeparture -> trackingMode.connection
         is TripTrackingMode.ReachedZeroActionPrompt -> trackingMode.connection
@@ -143,6 +121,32 @@ fun ActiveTripCountdownGlassPanel(
 
     val isBoarded = trackingMode is TripTrackingMode.BoardedCountingToDestination
     val isWaitingNegative = trackingMode is TripTrackingMode.WaitingInNegativeTime
+
+    val formattedTime by remember(remainingSeconds, isBoarded) {
+        derivedStateOf {
+            if (remainingSeconds in -180L..0L && !isBoarded) {
+                if (remainingSeconds in -45L..0L) "< 1 min" else "PŘÍJEZD"
+            } else {
+                val isNegative = remainingSeconds < 0
+                val absSec = abs(remainingSeconds)
+                val mins = absSec / 60
+                val secs = absSec % 60
+                val prefix = if (isNegative) "-" else ""
+                String.format("%s%02d:%02d", prefix, mins, secs)
+            }
+        }
+    }
+
+    val showZeroActionCards by remember(trackingMode, remainingSeconds) {
+        derivedStateOf {
+            when (trackingMode) {
+                is TripTrackingMode.ReachedZeroActionPrompt -> true
+                is TripTrackingMode.CountingDownToDeparture -> remainingSeconds < -180L
+                is TripTrackingMode.WaitingInNegativeTime -> true
+                else -> false
+            }
+        }
+    }
 
     val pulseScale by animateFloatAsState(
         targetValue = if (remainingSeconds in 0..10 && !isBoarded) 1.04f else 1.0f,
@@ -160,8 +164,9 @@ fun ActiveTripCountdownGlassPanel(
                 cornerRadius = 28.dp,
                 tintColor = when {
                     isBoarded -> Color(0xFF34D399)
+                    remainingSeconds in -180L..0L -> Color(0xFF38BDF8)
                     isWaitingNegative -> Color(0xFFFBBF24)
-                    remainingSeconds <= 0 -> Color(0xFFF87171)
+                    remainingSeconds < -180L -> Color(0xFFF87171)
                     else -> Color(0xFF60A5FA)
                 }
             )
@@ -217,7 +222,8 @@ fun ActiveTripCountdownGlassPanel(
             text = when {
                 isBoarded -> "JÍZDA V SPOJI • ODPOČET DO CÍLOVÉ STANICE"
                 isWaitingNegative -> "REŽIM ČEKÁNÍ NA SPOJ (ČEKÁM NA AKTUALIZACI DELAY Z GOLEMIO API)"
-                remainingSeconds <= 0 -> "SPOJ BY MĚL BÝT NA ZASTÁVCE"
+                remainingSeconds in -180L..0L -> "SPOJ PŘIJÍŽDÍ NA ZASTÁVKU"
+                remainingSeconds < -180L -> "SPOJ BY MĚL BÝT NA ZASTÁVCE"
                 else -> "ODJEZD ZE ZASTÁVKY ZA"
             },
             color = Color(0xFF93C5FD),
@@ -252,9 +258,11 @@ fun ActiveTripCountdownGlassPanel(
                     color = when {
                         isWaitingNegative -> Color(0xFFFBBF24)
                         isBoarded -> Color(0xFF4ADE80)
+                        remainingSeconds in -180L..0L -> Color(0xFF38BDF8)
+                        remainingSeconds < -180L -> Color(0xFFF87171)
                         else -> Color.White
                     },
-                    fontSize = 64.sp,
+                    fontSize = if (targetText.length > 5) 42.sp else 64.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.Monospace
                 )

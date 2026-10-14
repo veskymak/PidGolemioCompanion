@@ -130,13 +130,32 @@ fun TripDashboardScreen(
                             focusedBorderColor = Color(0xFF60A5FA),
                             unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
                         ),
-                        modifier = Modifier.weight(1.6f)
+                        modifier = Modifier.weight(1f)
                     )
 
+                    FilledIconButton(
+                        onClick = viewModel::refreshStopData,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = Color(0xFF2563EB)
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Vyhledat odjezdy",
+                            tint = Color.White
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     OutlinedTextField(
                         value = uiState.lineFilterQuery,
                         onValueChange = viewModel::onLineFilterChanged,
-                        label = { Text("Linka", color = Color.White.copy(alpha = 0.7f)) },
+                        label = { Text("Filtr linky (např. 412, 177)", color = Color.White.copy(alpha = 0.7f)) },
                         singleLine = true,
                         trailingIcon = {
                             if (uiState.lineFilterQuery.isNotEmpty()) {
@@ -162,21 +181,8 @@ fun TripDashboardScreen(
                             focusedBorderColor = Color(0xFF60A5FA),
                             unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
                         ),
-                        modifier = Modifier.weight(0.8f)
+                        modifier = Modifier.fillMaxWidth()
                     )
-
-                    FilledIconButton(
-                        onClick = viewModel::refreshStopData,
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = Color(0xFF2563EB)
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Vyhledat odjezdy",
-                            tint = Color.White
-                        )
-                    }
                 }
 
                 // Rychlý výběr oblíbených a mimopražských uzlů (Mladá Boleslav atd.)
@@ -347,7 +353,9 @@ private fun DepartureRowGlassCard(
     onSaveFavorite: (String) -> Unit
 ) {
     val nowMs = System.currentTimeMillis()
-    val inMinutes = ((connection.effectiveDepartureEpochMs - nowMs) / 60_000L).coerceAtLeast(0L)
+    val diffMs = connection.effectiveDepartureEpochMs - nowMs
+    val inMinutes = (diffMs / 60_000L).coerceAtLeast(0L)
+    val isArrivingNow = diffMs in -120_000L..45_000L
     val plannedHHmm = remember(connection.scheduledDepartureEpochMs) {
         departureHHmmFormatter.format(Instant.ofEpochMilli(connection.scheduledDepartureEpochMs))
     }
@@ -397,10 +405,14 @@ private fun DepartureRowGlassCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = if (inMinutes == 0L) "< 1 min" else "$inMinutes min",
-                    color = Color(0xFF38BDF8),
+                    text = when {
+                        isArrivingNow -> "PŘÍJEZD"
+                        inMinutes == 0L -> "< 1 min"
+                        else -> "$inMinutes min"
+                    },
+                    color = if (isArrivingNow) Color(0xFF34D399) else Color(0xFF38BDF8),
                     fontWeight = FontWeight.Black,
-                    fontSize = 18.sp
+                    fontSize = if (isArrivingNow) 15.sp else 18.sp
                 )
                 Text(
                     text = "Spustit odpočet",

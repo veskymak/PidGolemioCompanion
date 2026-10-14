@@ -1,8 +1,12 @@
 package cz.pid.golemiocompanion.ui.map
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.content.pm.PackageManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -19,11 +23,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
@@ -32,12 +40,14 @@ import com.google.android.gms.maps.model.LatLngBounds
 import com.google.maps.android.compose.*
 import cz.pid.golemiocompanion.BuildConfig
 import cz.pid.golemiocompanion.domain.model.LiveVehicleMarker
+import cz.pid.golemiocompanion.domain.model.ParkingLotPR
+import cz.pid.golemiocompanion.domain.model.SharedBikeStation
 import cz.pid.golemiocompanion.ui.components.liquidGlass
 import cz.pid.golemiocompanion.ui.trip.TripViewModel
 import kotlinx.coroutines.launch
 
 enum class MapDisplayMode(val label: String) {
-    GOOGLE_WEB("Google Web"),
+    GOOGLE_WEB("Webová mapa"),
     GOOGLE_SDK("Google SDK"),
     RADAR("120Hz Radar")
 }
@@ -47,6 +57,7 @@ fun LiveMapScreen(
     viewModel: TripViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val labSettings by viewModel.labSettingsFlow.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -72,12 +83,107 @@ fun LiveMapScreen(
     var webCenterLon by remember { mutableDoubleStateOf(14.4178) }
     var webZoom by remember { mutableFloatStateOf(12.5f) }
 
+    val fusedLocationClient = remember(context) { LocationServices.getFusedLocationProviderClient(context) }
+    var userLocation by remember { mutableStateOf<LatLng?>(null) }
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fine = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarse = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        hasLocationPermission = fine || coarse
+        if (hasLocationPermission) {
+            try {
+                fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                    .addOnSuccessListener { loc ->
+                        if (loc != null) {
+                            val latLng = LatLng(loc.latitude, loc.longitude)
+                            userLocation = latLng
+                            webCenterLat = loc.latitude
+                            webCenterLon = loc.longitude
+                            webZoom = 15f
+                            scope.launch {
+                                cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(latLng, 15f))
+                            }
+                        }
+                    }
+            } catch (_: SecurityException) {
+            }
+        }
+    }
+
+    val requestAndCenterOnUserLocation: () -> Unit = {
+        if (hasLocationPermission) {
+            try {
+                fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                    .addOnSuccessListener { loc ->
+                        if (loc != null) {
+                            val latLng = LatLng(loc.latitude, loc.longitude)
+                            userLocation = latLng
+                            webCenterLat = loc.latitude
+                            webCenterLon = loc.longitude
+                            webZoom = 15.5f
+                            scope.launch {
+                                cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(latLng, 15.5f))
+                            }
+                        } else {
+                            fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
+                                if (lastLoc != null) {
+                                    val latLng = LatLng(lastLoc.latitude, lastLoc.longitude)
+                                    userLocation = latLng
+                                    webCenterLat = lastLoc.latitude
+                                    webCenterLon = lastLoc.longitude
+                                    webZoom = 15.5f
+                                    scope.launch {
+                                        cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(latLng, 15.5f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+            } catch (_: SecurityException) {
+                permissionLauncher.launch(
+                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                )
+            }
+        } else {
+            permissionLauncher.launch(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            )
+        }
+    }
+
+    LaunchedEffect(hasLocationPermission) {
+        if (hasLocationPermission) {
+            try {
+                fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
+                    if (loc != null) {
+                        userLocation = LatLng(loc.latitude, loc.longitude)
+                    }
+                }
+            } catch (_: SecurityException) {
+            }
+        }
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         when (displayMode) {
             MapDisplayMode.GOOGLE_WEB -> {
                 WebGoogleMap(
                     apiKey = effectiveMapsKey,
                     vehicles = uiState.liveVehicles,
+                    userLat = userLocation?.latitude,
+                    userLon = userLocation?.longitude,
+                    showParkings = uiState.showParkingsLayer,
+                    parkings = uiState.parkingsPR,
+                    showBikes = uiState.showBikesLayer,
+                    bikes = uiState.mapSharedBikes,
                     centerLat = webCenterLat,
                     centerLon = webCenterLon,
                     zoom = webZoom
@@ -87,8 +193,21 @@ fun LiveMapScreen(
                 GoogleMap(
                     modifier = Modifier.fillMaxSize(),
                     cameraPositionState = cameraPositionState,
-                    uiSettings = MapUiSettings(zoomControlsEnabled = false)
+                    properties = MapProperties(
+                        isMyLocationEnabled = hasLocationPermission
+                    ),
+                    uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = false)
                 ) {
+                    userLocation?.let { uLoc ->
+                        if (!hasLocationPermission) {
+                            Marker(
+                                state = MarkerState(position = uLoc),
+                                title = "Moje poloha",
+                                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+                            )
+                        }
+                    }
+
                     uiState.liveVehicles.forEach { vehicle ->
                         val markerHue = when {
                             vehicle.delaySeconds <= 30 -> BitmapDescriptorFactory.HUE_AZURE
@@ -134,6 +253,7 @@ fun LiveMapScreen(
             MapDisplayMode.RADAR -> {
                 DynamicTelemetryRadar(
                     centerTarget = cameraPositionState.position.target,
+                    userLocation = userLocation,
                     vehicles = uiState.liveVehicles,
                     showParkings = uiState.showParkingsLayer,
                     parkings = uiState.parkingsPR,
@@ -193,7 +313,7 @@ fun LiveMapScreen(
                     )
                 }
 
-                // Výběr režimu mapy (Google Web s podporou Demo Key, Google SDK, 120Hz Radar)
+                // Výběr režimu mapy (Webová mapa, Google SDK, 120Hz Radar)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -207,63 +327,92 @@ fun LiveMapScreen(
                     }
                 }
 
-                // Rychlé skoky: Praha vs. Mladá Boleslav vs. Vycentrovat všechna vozidla
-                Row(
+                // Rychlé skoky: Moje poloha, Praha, Mladá Boleslav, Vozidla
+                LazyRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    SuggestionChip(
-                        onClick = {
-                            webCenterLat = pragueCenter.latitude
-                            webCenterLon = pragueCenter.longitude
-                            webZoom = 12.5f
-                            scope.launch {
-                                cameraPositionState.animate(
-                                    CameraUpdateFactory.newLatLngZoom(pragueCenter, 12.5f)
-                                )
+                    item {
+                        SuggestionChip(
+                            onClick = requestAndCenterOnUserLocation,
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.MyLocation,
+                                        contentDescription = null,
+                                        tint = Color(0xFF38BDF8),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (hasLocationPermission) "🎯 Moje poloha" else "🎯 Povolit polohu",
+                                        color = Color(0xFF38BDF8),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
-                        },
-                        label = { Text("📍 Praha", color = Color.White, fontSize = 11.sp) }
-                    )
+                        )
+                    }
 
-                    SuggestionChip(
-                        onClick = {
-                            webCenterLat = mbCenter.latitude
-                            webCenterLon = mbCenter.longitude
-                            webZoom = 13.5f
-                            scope.launch {
-                                cameraPositionState.animate(
-                                    CameraUpdateFactory.newLatLngZoom(mbCenter, 13.5f)
-                                )
-                            }
-                        },
-                        label = { Text("🚌 Mladá Boleslav", color = Color.White, fontSize = 11.sp) }
-                    )
-
-                    if (uiState.liveVehicles.isNotEmpty()) {
+                    item {
                         SuggestionChip(
                             onClick = {
-                                val lats = uiState.liveVehicles.map { it.lat }
-                                val lons = uiState.liveVehicles.map { it.lon }
-                                val minLat = lats.minOrNull() ?: 50.0
-                                val maxLat = lats.maxOrNull() ?: 50.5
-                                val minLon = lons.minOrNull() ?: 14.0
-                                val maxLon = lons.maxOrNull() ?: 15.0
-                                webCenterLat = (minLat + maxLat) / 2.0
-                                webCenterLon = (minLon + maxLon) / 2.0
-                                webZoom = 12f
-                                val bounds = LatLngBounds(
-                                    LatLng(minLat, minLon),
-                                    LatLng(maxLat, maxLon)
-                                )
+                                webCenterLat = pragueCenter.latitude
+                                webCenterLon = pragueCenter.longitude
+                                webZoom = 12.5f
                                 scope.launch {
-                                    runCatching {
-                                        cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 120))
-                                    }
+                                    cameraPositionState.animate(
+                                        CameraUpdateFactory.newLatLngZoom(pragueCenter, 12.5f)
+                                    )
                                 }
                             },
-                            label = { Text("🔍 Vozidla (${uiState.liveVehicles.size})", color = Color(0xFF38BDF8), fontSize = 11.sp) }
+                            label = { Text("📍 Praha", color = Color.White, fontSize = 11.sp) }
                         )
+                    }
+
+                    item {
+                        SuggestionChip(
+                            onClick = {
+                                webCenterLat = mbCenter.latitude
+                                webCenterLon = mbCenter.longitude
+                                webZoom = 13.5f
+                                scope.launch {
+                                    cameraPositionState.animate(
+                                        CameraUpdateFactory.newLatLngZoom(mbCenter, 13.5f)
+                                    )
+                                }
+                            },
+                            label = { Text("🚌 Mladá Boleslav", color = Color.White, fontSize = 11.sp) }
+                        )
+                    }
+
+                    if (uiState.liveVehicles.isNotEmpty()) {
+                        item {
+                            SuggestionChip(
+                                onClick = {
+                                    val lats = uiState.liveVehicles.map { it.lat }
+                                    val lons = uiState.liveVehicles.map { it.lon }
+                                    val minLat = lats.minOrNull() ?: 50.0
+                                    val maxLat = lats.maxOrNull() ?: 50.5
+                                    val minLon = lons.minOrNull() ?: 14.0
+                                    val maxLon = lons.maxOrNull() ?: 15.0
+                                    webCenterLat = (minLat + maxLat) / 2.0
+                                    webCenterLon = (minLon + maxLon) / 2.0
+                                    webZoom = 12f
+                                    val bounds = LatLngBounds(
+                                        LatLng(minLat, minLon),
+                                        LatLng(maxLat, maxLon)
+                                    )
+                                    scope.launch {
+                                        runCatching {
+                                            cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 120))
+                                        }
+                                    }
+                                },
+                                label = { Text("🔍 Vozidla (${uiState.liveVehicles.size})", color = Color(0xFF38BDF8), fontSize = 11.sp) }
+                            )
+                        }
                     }
                 }
 
@@ -312,7 +461,7 @@ fun LiveMapScreen(
                                 fontSize = 12.sp
                             )
                             Text(
-                                text = "Pro webový Demo Key zvolte režim „Google Web“, nebo vložte klíč v Nastavení.",
+                                text = "Režim „Webová mapa“ funguje okamžitě a bez omezení.",
                                 color = Color.White.copy(alpha = 0.75f),
                                 fontSize = 11.sp
                             )
@@ -321,7 +470,7 @@ fun LiveMapScreen(
                             onClick = { displayMode = MapDisplayMode.GOOGLE_WEB },
                             colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF38BDF8))
                         ) {
-                            Text("Google Web", fontWeight = FontWeight.Bold)
+                            Text("Webová mapa", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -425,11 +574,12 @@ private fun VehicleTelemetryCard(
 @Composable
 private fun DynamicTelemetryRadar(
     centerTarget: LatLng,
+    userLocation: LatLng?,
     vehicles: List<LiveVehicleMarker>,
     showParkings: Boolean,
-    parkings: List<cz.pid.golemiocompanion.domain.model.ParkingLotPR>,
+    parkings: List<ParkingLotPR>,
     showBikes: Boolean,
-    bikes: List<cz.pid.golemiocompanion.domain.model.SharedBikeStation>
+    bikes: List<SharedBikeStation>
 ) {
     Canvas(modifier = Modifier.fillMaxSize()) {
         val center = Offset(size.width / 2f, size.height / 2f)
@@ -442,7 +592,7 @@ private fun DynamicTelemetryRadar(
             )
         }
 
-        // Dynamická projekce relativně k aktuálnímu středu (Praha / Mladá Boleslav / vlastní pozice)
+        // Dynamická projekce relativně k aktuálnímu středu
         fun project(lat: Double, lon: Double): Offset {
             val dx = ((lon - centerTarget.longitude) * 16000.0).toFloat()
             val dy = ((centerTarget.latitude - lat) * 22000.0).toFloat()
@@ -461,6 +611,13 @@ private fun DynamicTelemetryRadar(
                 val pos = project(bike.lat, bike.lon)
                 drawCircle(color = Color(0xFFEC4899), radius = 10f, center = pos)
             }
+        }
+
+        userLocation?.let { uLoc ->
+            val uPos = project(uLoc.latitude, uLoc.longitude)
+            drawCircle(color = Color(0xFF38BDF8).copy(alpha = 0.3f), radius = 22f, center = uPos)
+            drawCircle(color = Color(0xFF38BDF8), radius = 9f, center = uPos)
+            drawCircle(color = Color.White, radius = 4f, center = uPos)
         }
 
         vehicles.forEach { v ->
@@ -489,6 +646,12 @@ private fun DynamicTelemetryRadar(
 private fun WebGoogleMap(
     apiKey: String,
     vehicles: List<LiveVehicleMarker>,
+    userLat: Double?,
+    userLon: Double?,
+    showParkings: Boolean,
+    parkings: List<ParkingLotPR>,
+    showBikes: Boolean,
+    bikes: List<SharedBikeStation>,
     centerLat: Double,
     centerLon: Double,
     zoom: Float,
@@ -497,142 +660,224 @@ private fun WebGoogleMap(
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var isReady by remember { mutableStateOf(false) }
 
-    val hasKey = apiKey.isNotBlank() && !apiKey.contains("YOUR_GOOGLE_MAPS_API_KEY")
+    val html = remember {
+        """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+            <style>
+                html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0b1120; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+                .bus-marker {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    border-radius: 8px;
+                    padding: 3px 6px;
+                    font-weight: 900;
+                    font-size: 11px;
+                    color: #ffffff;
+                    border: 2px solid rgba(255, 255, 255, 0.9);
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+                    white-space: nowrap;
+                }
+                .bus-green { background: #16a34a; }
+                .bus-yellow { background: #d97706; }
+                .bus-red { background: #dc2626; }
+                
+                .user-marker {
+                    position: relative;
+                    width: 24px;
+                    height: 24px;
+                }
+                .user-dot {
+                    width: 14px;
+                    height: 14px;
+                    background: #38bdf8;
+                    border: 2px solid #ffffff;
+                    border-radius: 50%;
+                    position: absolute;
+                    top: 5px;
+                    left: 5px;
+                    box-shadow: 0 0 12px rgba(56, 189, 248, 0.9);
+                }
+                .user-pulse {
+                    width: 24px;
+                    height: 24px;
+                    background: rgba(56, 189, 248, 0.45);
+                    border-radius: 50%;
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    animation: userPulse 2s infinite ease-out;
+                }
+                @keyframes userPulse {
+                    0% { transform: scale(0.6); opacity: 1; }
+                    100% { transform: scale(2.2); opacity: 0; }
+                }
 
-    val html = remember(apiKey) {
-        if (hasKey) {
-            """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-                <style>
-                    html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0f172a; }
-                </style>
-                <script src="https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap" async defer></script>
-                <script>
-                    var map;
-                    var markers = {};
-                    function initMap() {
-                        map = new google.maps.Map(document.getElementById('map'), {
-                            center: { lat: $centerLat, lng: $centerLon },
-                            zoom: ${zoom.toInt()},
-                            mapTypeControl: false,
-                            streetViewControl: false,
-                            fullscreenControl: false,
-                            styles: [
-                                { "elementType": "geometry", "stylers": [{ "color": "#1e293b" }] },
-                                { "elementType": "labels.text.stroke", "stylers": [{ "color": "#0f172a" }] },
-                                { "elementType": "labels.text.fill", "stylers": [{ "color": "#94a3b8" }] },
-                                { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#334155" }] },
-                                { "featureType": "road.highway", "elementType": "geometry", "stylers": [{ "color": "#475569" }] },
-                                { "featureType": "transit", "elementType": "geometry", "stylers": [{ "color": "#1e293b" }] },
-                                { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#0f172a" }] }
-                            ]
+                .parking-marker {
+                    background: #2563eb;
+                    color: white;
+                    border-radius: 6px;
+                    padding: 2px 5px;
+                    font-size: 10px;
+                    font-weight: bold;
+                    border: 1px solid #93c5fd;
+                    white-space: nowrap;
+                }
+                .bike-marker {
+                    background: #db2777;
+                    color: white;
+                    border-radius: 6px;
+                    padding: 2px 5px;
+                    font-size: 10px;
+                    font-weight: bold;
+                    border: 1px solid #f472b6;
+                    white-space: nowrap;
+                }
+                .leaflet-popup-content-wrapper {
+                    background: rgba(15, 23, 42, 0.94);
+                    color: white;
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    backdrop-filter: blur(12px);
+                    border-radius: 14px;
+                    font-size: 12px;
+                }
+                .leaflet-popup-tip {
+                    background: rgba(15, 23, 42, 0.94);
+                }
+            </style>
+        </head>
+        <body>
+            <div id="map"></div>
+            <script>
+                var map = L.map('map', { zoomControl: false, attributionControl: false })
+                    .setView([$centerLat, $centerLon], ${zoom.toInt()});
+                
+                // CartoDB Dark Matter tiles (velmi rychlé, tmavé, dokonale ladící s Liquid Glass)
+                var baseTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                    subdomains: 'abcd',
+                    maxZoom: 19
+                }).addTo(map);
+
+                baseTileLayer.on('tileerror', function() {
+                    if (!window.osmFallbackAdded) {
+                        window.osmFallbackAdded = true;
+                        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+                    }
+                });
+
+                var markers = {};
+                var parkingsLayer = L.layerGroup().addTo(map);
+                var bikesLayer = L.layerGroup().addTo(map);
+                var userMarker = null;
+
+                function updateUserLocation(lat, lng) {
+                    if (lat == null || lng == null) {
+                        if (userMarker) {
+                            map.removeLayer(userMarker);
+                            userMarker = null;
+                        }
+                        return;
+                    }
+                    if (userMarker) {
+                        userMarker.setLatLng([lat, lng]);
+                    } else {
+                        var icon = L.divIcon({
+                            className: 'user-marker',
+                            html: '<div class="user-pulse"></div><div class="user-dot"></div>',
+                            iconSize: [24, 24],
+                            iconAnchor: [12, 12]
                         });
+                        userMarker = L.marker([lat, lng], { icon: icon, zIndexOffset: 2000 }).addTo(map)
+                            .bindPopup('<b>Vaše aktuální GPS poloha</b>');
                     }
-                    function updateVehicles(list) {
-                        if (!map) return;
-                        var currentIds = {};
-                        for (var i = 0; i < list.length; i++) {
-                            var v = list[i];
-                            currentIds[v.id] = true;
-                            if (markers[v.id]) {
-                                markers[v.id].setPosition({ lat: v.lat, lng: v.lng });
-                            } else {
-                                markers[v.id] = new google.maps.Marker({
-                                    position: { lat: v.lat, lng: v.lng },
-                                    map: map,
-                                    title: "Linka " + v.line + " -> " + v.headsign,
-                                    label: {
-                                        text: v.line,
-                                        color: "#ffffff",
-                                        fontWeight: "bold",
-                                        fontSize: "11px"
-                                    }
-                                });
-                            }
-                        }
-                        for (var id in markers) {
-                            if (!currentIds[id]) {
-                                markers[id].setMap(null);
-                                delete markers[id];
-                            }
-                        }
-                    }
-                    function panToCoords(lat, lng, z) {
-                        if (map) {
-                            map.panTo({ lat: lat, lng: lng });
-                            if (z) map.setZoom(z);
-                        }
-                    }
-                </script>
-            </head>
-            <body>
-                <div id="map"></div>
-            </body>
-            </html>
-            """.trimIndent()
-        } else {
-            """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-                <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-                <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-                <style>
-                    html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0f172a; }
-                    .bus-badge {
-                        background: #2563eb;
-                        color: #ffffff;
-                        border: 2px solid white;
-                        border-radius: 8px;
-                        padding: 2px 5px;
-                        font-weight: bold;
-                        font-size: 11px;
-                        text-align: center;
-                    }
-                </style>
-            </head>
-            <body>
-                <div id="map"></div>
-                <script>
-                    var map = L.map('map', { zoomControl: false }).setView([$centerLat, $centerLon], ${zoom.toInt()});
-                    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
-                    var markers = {};
-                    function updateVehicles(list) {
-                        var currentIds = {};
-                        for (var i = 0; i < list.length; i++) {
-                            var v = list[i];
-                            currentIds[v.id] = true;
-                            var icon = L.divIcon({
-                                className: 'bus-icon',
-                                html: '<div class="bus-badge">' + v.line + '</div>',
-                                iconSize: [36, 20]
-                            });
-                            if (markers[v.id]) {
-                                markers[v.id].setLatLng([v.lat, v.lng]);
-                            } else {
-                                markers[v.id] = L.marker([v.lat, v.lng], { icon: icon }).addTo(map)
-                                    .bindPopup('<b>Linka ' + v.line + '</b><br>' + v.headsign + '<br>Zpoždění: ' + v.delay + ' s');
-                            }
-                        }
-                        for (var id in markers) {
-                            if (!currentIds[id]) {
-                                map.removeLayer(markers[id]);
-                                delete markers[id];
-                            }
+                }
+
+                function updateVehicles(list) {
+                    var currentIds = {};
+                    for (var i = 0; i < list.length; i++) {
+                        var v = list[i];
+                        currentIds[v.id] = true;
+                        var colorClass = v.delay <= 30 ? 'bus-green' : (v.delay <= 120 ? 'bus-yellow' : 'bus-red');
+                        var iconHtml = '<div class="bus-marker ' + colorClass + '">' + v.line + '</div>';
+                        var icon = L.divIcon({
+                            className: 'leaflet-bus-icon',
+                            html: iconHtml,
+                            iconSize: [38, 22],
+                            iconAnchor: [19, 11]
+                        });
+
+                        var popupContent = '<div style="min-width:140px;">' +
+                            '<b style="font-size:14px;color:#38bdf8;">Linka ' + v.line + '</b><br>' +
+                            '<span style="color:#e2e8f0;">' + v.headsign + '</span><br>' +
+                            '<div style="margin-top:4px;font-size:11px;">' +
+                            'Zpoždění: <b style="color:' + (v.delay > 60 ? '#f87171' : '#4ade80') + '">+' + v.delay + ' s</b><br>' +
+                            'Rychlost: ' + Math.round(v.speed) + ' km/h' +
+                            '</div></div>';
+
+                        if (markers[v.id]) {
+                            markers[v.id].setLatLng([v.lat, v.lng]);
+                            markers[v.id].setIcon(icon);
+                        } else {
+                            markers[v.id] = L.marker([v.lat, v.lng], { icon: icon })
+                                .addTo(map)
+                                .bindPopup(popupContent);
                         }
                     }
-                    function panToCoords(lat, lng, z) {
-                        map.setView([lat, lng], z || 13);
+                    for (var id in markers) {
+                        if (!currentIds[id]) {
+                            map.removeLayer(markers[id]);
+                            delete markers[id];
+                        }
                     }
-                </script>
-            </body>
-            </html>
-            """.trimIndent()
-        }
+                }
+
+                function updateParkings(show, list) {
+                    parkingsLayer.clearLayers();
+                    if (!show || !list) return;
+                    for (var i = 0; i < list.length; i++) {
+                        var p = list[i];
+                        var icon = L.divIcon({
+                            className: 'leaflet-p-icon',
+                            html: '<div class="parking-marker">P ' + p.free + '</div>',
+                            iconSize: [42, 18],
+                            iconAnchor: [21, 9]
+                        });
+                        L.marker([p.lat, p.lng], { icon: icon })
+                            .addTo(parkingsLayer)
+                            .bindPopup('<b>P+R ' + p.name + '</b><br>Volno: ' + p.free + ' / ' + p.total);
+                    }
+                }
+
+                function updateBikes(show, list) {
+                    bikesLayer.clearLayers();
+                    if (!show || !list) return;
+                    for (var i = 0; i < list.length; i++) {
+                        var b = list[i];
+                        var icon = L.divIcon({
+                            className: 'leaflet-bike-icon',
+                            html: '<div class="bike-marker">🚲 ' + b.free + '</div>',
+                            iconSize: [40, 18],
+                            iconAnchor: [20, 9]
+                        });
+                        L.marker([b.lat, b.lng], { icon: icon })
+                            .addTo(bikesLayer)
+                            .bindPopup('<b>' + b.provider + ': ' + b.name + '</b><br>Volných kol: ' + b.free);
+                    }
+                }
+
+                function panToCoords(lat, lng, z) {
+                    map.flyTo([lat, lng], z || 14, { duration: 0.8 });
+                }
+            </script>
+        </body>
+        </html>
+        """.trimIndent()
     }
 
     LaunchedEffect(centerLat, centerLon, zoom) {
@@ -653,16 +898,49 @@ private fun WebGoogleMap(
                         isReady = true
                     }
                 }
-                loadDataWithBaseURL("https://maps.googleapis.com", html, "text/html", "UTF-8", null)
+                loadDataWithBaseURL("https://pid-golemio-map.internal", html, "text/html", "UTF-8", null)
                 webViewInstance = this
             }
         },
         update = { webView ->
             if (isReady) {
-                val vehiclesJson = vehicles.take(75).map { v ->
-                    """{"id":"${v.tripId.replace("\"", "")}","line":"${v.routeShortName}","headsign":"${v.headsign.replace("\"", "").replace("'", "")}","lat":${v.lat},"lng":${v.lon},"delay":${v.delaySeconds}}"""
+                // Aktualizace GPS polohy uživatele
+                if (userLat != null && userLon != null) {
+                    webView.evaluateJavascript("if (typeof updateUserLocation === 'function') updateUserLocation($userLat, $userLon);", null)
+                } else {
+                    webView.evaluateJavascript("if (typeof updateUserLocation === 'function') updateUserLocation(null, null);", null)
+                }
+
+                // Aktualizace vozidel PID
+                val vehiclesJson = vehicles.take(120).map { v ->
+                    val cleanLine = v.routeShortName.replace("\"", "").replace("'", "")
+                    val cleanHeadsign = v.headsign.replace("\"", "").replace("'", "")
+                    """{"id":"${v.tripId.replace("\"", "")}","line":"$cleanLine","headsign":"$cleanHeadsign","lat":${v.lat},"lng":${v.lon},"delay":${v.delaySeconds},"speed":${v.speedKmh}}"""
                 }.joinToString(",", "[", "]")
                 webView.evaluateJavascript("if (typeof updateVehicles === 'function') updateVehicles($vehiclesJson);", null)
+
+                // Aktualizace P+R parkovišť
+                if (showParkings) {
+                    val parkingsJson = parkings.take(80).map { p ->
+                        val cleanName = p.name.replace("\"", "").replace("'", "")
+                        """{"name":"$cleanName","lat":${p.lat},"lng":${p.lon},"free":${p.freePlaces},"total":${p.totalPlaces}}"""
+                    }.joinToString(",", "[", "]")
+                    webView.evaluateJavascript("if (typeof updateParkings === 'function') updateParkings(true, $parkingsJson);", null)
+                } else {
+                    webView.evaluateJavascript("if (typeof updateParkings === 'function') updateParkings(false, []);", null)
+                }
+
+                // Aktualizace sdílených kol
+                if (showBikes) {
+                    val bikesJson = bikes.take(80).map { b ->
+                        val cleanName = b.name.replace("\"", "").replace("'", "")
+                        val cleanProvider = b.provider.replace("\"", "").replace("'", "")
+                        """{"name":"$cleanName","provider":"$cleanProvider","lat":${b.lat},"lng":${b.lon},"free":${b.freeBikes}}"""
+                    }.joinToString(",", "[", "]")
+                    webView.evaluateJavascript("if (typeof updateBikes === 'function') updateBikes(true, $bikesJson);", null)
+                } else {
+                    webView.evaluateJavascript("if (typeof updateBikes === 'function') updateBikes(false, []);", null)
+                }
             }
         }
     )

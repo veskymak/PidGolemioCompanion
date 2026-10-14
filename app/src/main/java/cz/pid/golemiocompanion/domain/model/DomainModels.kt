@@ -27,10 +27,10 @@ data class StopConnection(
         get() = officialDelaySeconds + phantomAiExtraDelaySeconds
 
     val effectiveDepartureEpochMs: Long
-        get() = scheduledDepartureEpochMs + (totalDelaySeconds * 1000L)
+        get() = maxOf(predictedDepartureEpochMs, scheduledDepartureEpochMs + (totalDelaySeconds * 1000L))
 
     val effectiveDestinationArrivalEpochMs: Long
-        get() = scheduledArrivalDestinationEpochMs + (totalDelaySeconds * 1000L)
+        get() = maxOf(predictedArrivalDestinationEpochMs, scheduledArrivalDestinationEpochMs + (totalDelaySeconds * 1000L))
 }
 
 @Immutable

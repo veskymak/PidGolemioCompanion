@@ -1,0 +1,191 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="cz.pid.golemiocompanion"
+4    android:versionCode="1"
+5    android:versionName="1.0.0-LAB" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="26"
+9        android:targetSdkVersion="35" />
+10
+11    <uses-permission android:name="android.permission.INTERNET" />
+11-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:5:5-67
+11-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:5:22-64
+12    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+12-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:6:5-79
+12-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:6:22-76
+13    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+13-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:7:5-79
+13-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:7:22-76
+14    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+14-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:8:5-81
+14-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:8:22-78
+15    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+15-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:9:5-78
+15-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:9:22-75
+16    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+16-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:10:5-77
+16-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:10:22-74
+17
+18    <uses-feature
+18-->[com.google.android.gms:play-services-maps:19.0.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\070a1ef5eb0cbc70b352d15b556e5d56\workspace\transformed\play-services-maps-19.0.0\AndroidManifest.xml:26:5-28:35
+19        android:glEsVersion="0x00020000"
+19-->[com.google.android.gms:play-services-maps:19.0.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\070a1ef5eb0cbc70b352d15b556e5d56\workspace\transformed\play-services-maps-19.0.0\AndroidManifest.xml:27:9-41
+20        android:required="true" />
+20-->[com.google.android.gms:play-services-maps:19.0.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\070a1ef5eb0cbc70b352d15b556e5d56\workspace\transformed\play-services-maps-19.0.0\AndroidManifest.xml:28:9-32
+21
+22    <queries>
+22-->[com.google.android.gms:play-services-maps:19.0.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\070a1ef5eb0cbc70b352d15b556e5d56\workspace\transformed\play-services-maps-19.0.0\AndroidManifest.xml:30:5-34:15
+23
+24        <!-- Needs to be explicitly declared on Android R+ -->
+25        <package android:name="com.google.android.apps.maps" />
+25-->[com.google.android.gms:play-services-maps:19.0.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\070a1ef5eb0cbc70b352d15b556e5d56\workspace\transformed\play-services-maps-19.0.0\AndroidManifest.xml:33:9-64
+25-->[com.google.android.gms:play-services-maps:19.0.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\070a1ef5eb0cbc70b352d15b556e5d56\workspace\transformed\play-services-maps-19.0.0\AndroidManifest.xml:33:18-61
+26    </queries>
+27
+28    <permission
+28-->[androidx.core:core:1.13.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\1c4f1b59ae61eda2a100004b631effad\workspace\transformed\core-1.13.1\AndroidManifest.xml:22:5-24:47
+29        android:name="cz.pid.golemiocompanion.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+29-->[androidx.core:core:1.13.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\1c4f1b59ae61eda2a100004b631effad\workspace\transformed\core-1.13.1\AndroidManifest.xml:23:9-81
+30        android:protectionLevel="signature" />
+30-->[androidx.core:core:1.13.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\1c4f1b59ae61eda2a100004b631effad\workspace\transformed\core-1.13.1\AndroidManifest.xml:24:9-44
+31
+32    <uses-permission android:name="cz.pid.golemiocompanion.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+32-->[androidx.core:core:1.13.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\1c4f1b59ae61eda2a100004b631effad\workspace\transformed\core-1.13.1\AndroidManifest.xml:26:5-97
+32-->[androidx.core:core:1.13.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\1c4f1b59ae61eda2a100004b631effad\workspace\transformed\core-1.13.1\AndroidManifest.xml:26:22-94
+33
+34    <application
+34-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:12:5-34:19
+35        android:allowBackup="true"
+35-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:13:9-35
+36        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+36-->[androidx.core:core:1.13.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\1c4f1b59ae61eda2a100004b631effad\workspace\transformed\core-1.13.1\AndroidManifest.xml:28:18-86
+37        android:debuggable="true"
+38        android:extractNativeLibs="false"
+39        android:label="PID Golemio Glass"
+39-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:14:9-42
+40        android:supportsRtl="true"
+40-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:15:9-35
+41        android:theme="@android:style/Theme.Material.NoActionBar" >
+41-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:16:9-66
+42        <meta-data
+43            android:name="com.google.android.geo.API_KEY"
+43-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:20:13-58
+44            android:value="AIzaSyA48ZHKCa-Gpy1xoQORP0nXh4xvilwfJWw" />
+44-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:21:13-42
+45
+46        <activity
+46-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:23:9-33:20
+47            android:name="cz.pid.golemiocompanion.MainActivity"
+47-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:24:13-41
+48            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
+48-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:25:13-91
+49            android:exported="true"
+49-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:26:13-36
+50            android:supportsPictureInPicture="true"
+50-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:27:13-52
+51            android:theme="@android:style/Theme.Material.NoActionBar" >
+51-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:28:13-70
+52            <intent-filter>
+52-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:29:13-32:29
+53                <action android:name="android.intent.action.MAIN" />
+53-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:30:17-69
+53-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:30:25-66
+54
+55                <category android:name="android.intent.category.LAUNCHER" />
+55-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:31:17-77
+55-->C:\Users\vacla\Desktop\PidGolemioCompanion\PidGolemioCompanion\app\src\main\AndroidManifest.xml:31:27-74
+56            </intent-filter>
+57        </activity>
+58        <!-- Needs to be explicitly declared on P+ -->
+59        <uses-library
+59-->[com.google.android.gms:play-services-maps:19.0.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\070a1ef5eb0cbc70b352d15b556e5d56\workspace\transformed\play-services-maps-19.0.0\AndroidManifest.xml:39:9-41:40
+60            android:name="org.apache.http.legacy"
+60-->[com.google.android.gms:play-services-maps:19.0.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\070a1ef5eb0cbc70b352d15b556e5d56\workspace\transformed\play-services-maps-19.0.0\AndroidManifest.xml:40:13-50
+61            android:required="false" />
+61-->[com.google.android.gms:play-services-maps:19.0.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\070a1ef5eb0cbc70b352d15b556e5d56\workspace\transformed\play-services-maps-19.0.0\AndroidManifest.xml:41:13-37
+62
+63        <activity
+63-->[com.google.android.gms:play-services-base:18.5.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\30d2d094428760e9d8e37210a20f2ebc\workspace\transformed\play-services-base-18.5.0\AndroidManifest.xml:5:9-173
+64            android:name="com.google.android.gms.common.api.GoogleApiActivity"
+64-->[com.google.android.gms:play-services-base:18.5.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\30d2d094428760e9d8e37210a20f2ebc\workspace\transformed\play-services-base-18.5.0\AndroidManifest.xml:5:19-85
+65            android:exported="false"
+65-->[com.google.android.gms:play-services-base:18.5.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\30d2d094428760e9d8e37210a20f2ebc\workspace\transformed\play-services-base-18.5.0\AndroidManifest.xml:5:146-170
+66            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+66-->[com.google.android.gms:play-services-base:18.5.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\30d2d094428760e9d8e37210a20f2ebc\workspace\transformed\play-services-base-18.5.0\AndroidManifest.xml:5:86-145
+67
+68        <meta-data
+68-->[com.google.android.gms:play-services-basement:18.4.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\87ac4e28a5cf519543b8bc04728e4bf1\workspace\transformed\play-services-basement-18.4.0\AndroidManifest.xml:6:9-122
+69            android:name="com.google.android.gms.version"
+69-->[com.google.android.gms:play-services-basement:18.4.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\87ac4e28a5cf519543b8bc04728e4bf1\workspace\transformed\play-services-basement-18.4.0\AndroidManifest.xml:6:20-65
+70            android:value="@integer/google_play_services_version" />
+70-->[com.google.android.gms:play-services-basement:18.4.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\87ac4e28a5cf519543b8bc04728e4bf1\workspace\transformed\play-services-basement-18.4.0\AndroidManifest.xml:6:66-119
+71
+72        <provider
+72-->[androidx.emoji2:emoji2:1.3.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\d2fa28914bf825875ea2eb18d403e2a2\workspace\transformed\emoji2-1.3.0\AndroidManifest.xml:24:9-32:20
+73            android:name="androidx.startup.InitializationProvider"
+73-->[androidx.emoji2:emoji2:1.3.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\d2fa28914bf825875ea2eb18d403e2a2\workspace\transformed\emoji2-1.3.0\AndroidManifest.xml:25:13-67
+74            android:authorities="cz.pid.golemiocompanion.androidx-startup"
+74-->[androidx.emoji2:emoji2:1.3.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\d2fa28914bf825875ea2eb18d403e2a2\workspace\transformed\emoji2-1.3.0\AndroidManifest.xml:26:13-68
+75            android:exported="false" >
+75-->[androidx.emoji2:emoji2:1.3.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\d2fa28914bf825875ea2eb18d403e2a2\workspace\transformed\emoji2-1.3.0\AndroidManifest.xml:27:13-37
+76            <meta-data
+76-->[androidx.emoji2:emoji2:1.3.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\d2fa28914bf825875ea2eb18d403e2a2\workspace\transformed\emoji2-1.3.0\AndroidManifest.xml:29:13-31:52
+77                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+77-->[androidx.emoji2:emoji2:1.3.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\d2fa28914bf825875ea2eb18d403e2a2\workspace\transformed\emoji2-1.3.0\AndroidManifest.xml:30:17-75
+78                android:value="androidx.startup" />
+78-->[androidx.emoji2:emoji2:1.3.0] C:\Users\vacla\.gradle\caches\9.2.0\transforms\d2fa28914bf825875ea2eb18d403e2a2\workspace\transformed\emoji2-1.3.0\AndroidManifest.xml:31:17-49
+79            <meta-data
+79-->[androidx.lifecycle:lifecycle-process:2.8.6] C:\Users\vacla\.gradle\caches\9.2.0\transforms\19613189462bbacea4d7726c73b14226\workspace\transformed\lifecycle-process-2.8.6\AndroidManifest.xml:29:13-31:52
+80                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+80-->[androidx.lifecycle:lifecycle-process:2.8.6] C:\Users\vacla\.gradle\caches\9.2.0\transforms\19613189462bbacea4d7726c73b14226\workspace\transformed\lifecycle-process-2.8.6\AndroidManifest.xml:30:17-78
+81                android:value="androidx.startup" />
+81-->[androidx.lifecycle:lifecycle-process:2.8.6] C:\Users\vacla\.gradle\caches\9.2.0\transforms\19613189462bbacea4d7726c73b14226\workspace\transformed\lifecycle-process-2.8.6\AndroidManifest.xml:31:17-49
+82            <meta-data
+82-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:29:13-31:52
+83                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+83-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:30:17-85
+84                android:value="androidx.startup" />
+84-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:31:17-49
+85        </provider>
+86
+87        <receiver
+87-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:34:9-52:20
+88            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+88-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:35:13-76
+89            android:directBootAware="false"
+89-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:36:13-44
+90            android:enabled="true"
+90-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:37:13-35
+91            android:exported="true"
+91-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:38:13-36
+92            android:permission="android.permission.DUMP" >
+92-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:39:13-57
+93            <intent-filter>
+93-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:40:13-42:29
+94                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+94-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:41:17-91
+94-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:41:25-88
+95            </intent-filter>
+96            <intent-filter>
+96-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:43:13-45:29
+97                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+97-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:44:17-85
+97-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:44:25-82
+98            </intent-filter>
+99            <intent-filter>
+99-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:46:13-48:29
+100                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+100-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:47:17-88
+100-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:47:25-85
+101            </intent-filter>
+102            <intent-filter>
+102-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:49:13-51:29
+103                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+103-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:50:17-95
+103-->[androidx.profileinstaller:profileinstaller:1.3.1] C:\Users\vacla\.gradle\caches\9.2.0\transforms\2d506dc8375b024b86d20ac6a46b3aa2\workspace\transformed\profileinstaller-1.3.1\AndroidManifest.xml:50:25-92
+104            </intent-filter>
+105        </receiver>
+106    </application>
+107
+108</manifest>
