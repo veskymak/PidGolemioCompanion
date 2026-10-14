@@ -36,7 +36,8 @@ data class TripUiState(
     val mapLineFilter: String = "",
     val departuresError: String? = null,
     val isLiveData: Boolean = false,
-    val isApiKeyConfigured: Boolean = false
+    val isApiKeyConfigured: Boolean = false,
+    val stopSuggestions: List<PidStopSuggestion> = emptyList()
 )
 
 class TripViewModel(
@@ -89,8 +90,41 @@ class TripViewModel(
         }
     }
 
+    private var stopQueryDebounceJob: Job? = null
+
     fun onStopQueryChanged(query: String) {
-        _uiState.update { it.copy(stopSearchQuery = query) }
+        val trimmed = query.trim()
+        val suggestions = if (trimmed.length >= 2) {
+            PidStopDirectory.search(trimmed)
+        } else {
+            emptyList()
+        }
+
+        _uiState.update {
+            it.copy(
+                stopSearchQuery = query,
+                stopSuggestions = suggestions
+            )
+        }
+
+        stopQueryDebounceJob?.cancel()
+        if (trimmed.length >= 2) {
+            stopQueryDebounceJob = viewModelScope.launch {
+                delay(3500L) // Automatické spuštění načtení po cca 3.5s nečinnosti po psaní
+                refreshStopData()
+            }
+        }
+    }
+
+    fun onSelectSuggestedStop(suggestedStopName: String) {
+        stopQueryDebounceJob?.cancel()
+        _uiState.update {
+            it.copy(
+                stopSearchQuery = suggestedStopName,
+                stopSuggestions = emptyList()
+            )
+        }
+        refreshStopData()
     }
 
     fun onLineFilterChanged(line: String) {

@@ -34,6 +34,14 @@ data class StopConnection(
 }
 
 @Immutable
+data class PidStopSuggestion(
+    val name: String,
+    val icon: String,
+    val typeDescription: String,
+    val subtitle: String
+)
+
+@Immutable
 data class FavoriteConnection(
     val id: String,
     val stopName: String,

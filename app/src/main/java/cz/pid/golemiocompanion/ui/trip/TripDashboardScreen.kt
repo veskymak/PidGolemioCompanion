@@ -185,6 +185,75 @@ fun TripDashboardScreen(
                     )
                 }
 
+                // Našeptávač návrhů zastávek PID (Suggestions s automatickým načtením po dopsání)
+                if (uiState.stopSuggestions.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .liquidGlass(cornerRadius = 16.dp, tintColor = Color(0xFF38BDF8), surfaceAlphaTop = 0.18f)
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "💡 Návrhy zastávek PID:",
+                                color = Color(0xFF38BDF8),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "automatické načtení za 3s",
+                                color = Color.White.copy(alpha = 0.55f),
+                                fontSize = 10.sp
+                            )
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            uiState.stopSuggestions.forEach { suggestion ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            viewModel.onSelectSuggestedStop(suggestion.name)
+                                        }
+                                        .padding(vertical = 4.dp, horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Text(
+                                        text = suggestion.icon,
+                                        fontSize = 16.sp
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = suggestion.name,
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "${suggestion.typeDescription} • ${suggestion.subtitle}",
+                                            color = Color.White.copy(alpha = 0.72f),
+                                            fontSize = 11.sp,
+                                            maxLines = 1
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowOutward,
+                                        contentDescription = "Zvolit zastávku",
+                                        tint = Color(0xFF38BDF8).copy(alpha = 0.7f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Rychlý výběr oblíbených a mimopražských uzlů (Mladá Boleslav atd.)
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -192,6 +261,7 @@ fun TripDashboardScreen(
                 ) {
                     val presets = listOf(
                         "Mladá Boleslav, aut. st." to "🚌 MB aut. st.",
+                        "Mladá Boleslav město" to "🚆 MB město",
                         "Mladá Boleslav, hl.nádr." to "🚆 MB hl.nádr.",
                         "Černý Most" to "🚌 Černý Most",
                         "Anděl" to "📍 Anděl",
@@ -223,9 +293,9 @@ fun TripDashboardScreen(
                 val queryNorm = uiState.stopSearchQuery.lowercase()
                 if (queryNorm.contains("boles") || queryNorm.contains("mlad") || queryNorm == "mb") {
                     val mbStops = listOf(
+                        "Mladá Boleslav město",
                         "Mladá Boleslav, aut. st.",
                         "Mladá Boleslav, hl.nádr.",
-                        "Mladá Boleslav, město",
                         "Mladá Boleslav, nám. Republiky",
                         "Mladá Boleslav, Václava Klementa",
                         "Mladá Boleslav, U Sportu",
@@ -248,8 +318,13 @@ fun TripDashboardScreen(
                                         viewModel.refreshStopData()
                                     }
                                 ) {
+                                    val chipText = if (stopName.contains(", ")) {
+                                        stopName.substringAfter(", ")
+                                    } else {
+                                        stopName.replace("Mladá Boleslav ", "")
+                                    }
                                     Text(
-                                        text = stopName.substringAfter(", "),
+                                        text = chipText,
                                         color = Color.White,
                                         fontSize = 11.sp,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)

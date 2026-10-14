@@ -12,14 +12,14 @@ interface GolemioApiService {
         @Header("X-Access-Token") apiKey: String,
         @Query("names") stopNames: List<String>? = null,
         @Query("ids") stopIds: List<String>? = null,
-        @Query("minutesBefore") minutesBefore: Int = 5,
-        @Query("minutesAfter") minutesAfter: Int = 60,
+        @Query("minutesBefore") minutesBefore: Int = 10,
+        @Query("minutesAfter") minutesAfter: Int = 360,
         @Query("includeMetroTrains") includeMetroTrains: Boolean = true,
         @Query("airCondition") airCondition: Boolean = true,
         @Query("preferredTimezone") preferredTimezone: String = "Europe/Prague",
         @Query("mode") mode: String = "departures",
         @Query("order") order: String = "real",
-        @Query("limit") limit: Int = 20
+        @Query("limit") limit: Int = 40
     ): PidDepartureBoardResponseDto
 
     @GET("v2/pid/vehiclepositions")

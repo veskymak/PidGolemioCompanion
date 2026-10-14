@@ -3,6 +3,8 @@ package cz.pid.golemiocompanion.ui.map
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -47,9 +49,9 @@ import cz.pid.golemiocompanion.ui.trip.TripViewModel
 import kotlinx.coroutines.launch
 
 enum class MapDisplayMode(val label: String) {
-    GOOGLE_WEB("Webová mapa"),
-    GOOGLE_SDK("Google SDK"),
-    RADAR("120Hz Radar")
+    OPEN_STREET_MAP("Mapa (OSM)"),
+    RADAR("120Hz Radar"),
+    GOOGLE_SDK("Google SDK")
 }
 
 @Composable
@@ -70,7 +72,7 @@ fun LiveMapScreen(
     }
 
     var displayMode by remember {
-        mutableStateOf(MapDisplayMode.GOOGLE_WEB)
+        mutableStateOf(MapDisplayMode.OPEN_STREET_MAP)
     }
 
     val pragueCenter = remember { LatLng(50.0755, 14.4178) }
@@ -92,6 +94,16 @@ fun LiveMapScreen(
         )
     }
 
+    val animateCameraIfGoogleMap: (LatLng, Float) -> Unit = { latLng, zoom ->
+        if (displayMode == MapDisplayMode.GOOGLE_SDK) {
+            scope.launch {
+                runCatching {
+                    cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(latLng, zoom))
+                }
+            }
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -108,9 +120,7 @@ fun LiveMapScreen(
                             webCenterLat = loc.latitude
                             webCenterLon = loc.longitude
                             webZoom = 15f
-                            scope.launch {
-                                cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(latLng, 15f))
-                            }
+                            animateCameraIfGoogleMap(latLng, 15f)
                         }
                     }
             } catch (_: SecurityException) {
@@ -129,9 +139,7 @@ fun LiveMapScreen(
                             webCenterLat = loc.latitude
                             webCenterLon = loc.longitude
                             webZoom = 15.5f
-                            scope.launch {
-                                cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(latLng, 15.5f))
-                            }
+                            animateCameraIfGoogleMap(latLng, 15.5f)
                         } else {
                             fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
                                 if (lastLoc != null) {
@@ -140,9 +148,7 @@ fun LiveMapScreen(
                                     webCenterLat = lastLoc.latitude
                                     webCenterLon = lastLoc.longitude
                                     webZoom = 15.5f
-                                    scope.launch {
-                                        cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(latLng, 15.5f))
-                                    }
+                                    animateCameraIfGoogleMap(latLng, 15.5f)
                                 }
                             }
                         }
@@ -174,9 +180,8 @@ fun LiveMapScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         when (displayMode) {
-            MapDisplayMode.GOOGLE_WEB -> {
-                WebGoogleMap(
-                    apiKey = effectiveMapsKey,
+            MapDisplayMode.OPEN_STREET_MAP -> {
+                WebOsmMap(
                     vehicles = uiState.liveVehicles,
                     userLat = userLocation?.latitude,
                     userLon = userLocation?.longitude,
@@ -252,7 +257,7 @@ fun LiveMapScreen(
             }
             MapDisplayMode.RADAR -> {
                 DynamicTelemetryRadar(
-                    centerTarget = cameraPositionState.position.target,
+                    centerTarget = if (displayMode == MapDisplayMode.GOOGLE_SDK) cameraPositionState.position.target else LatLng(webCenterLat, webCenterLon),
                     userLocation = userLocation,
                     vehicles = uiState.liveVehicles,
                     showParkings = uiState.showParkingsLayer,
@@ -313,7 +318,7 @@ fun LiveMapScreen(
                     )
                 }
 
-                // Výběr režimu mapy (Webová mapa, Google SDK, 120Hz Radar)
+                // Výběr režimu mapy (Mapa OSM, 120Hz Radar, Google SDK)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -341,7 +346,7 @@ fun LiveMapScreen(
                                         imageVector = Icons.Default.MyLocation,
                                         contentDescription = null,
                                         tint = Color(0xFF38BDF8),
-                                        modifier = Modifier.size(14.dp)
+                                        modifier = Modifier.size(15.dp)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
@@ -361,11 +366,7 @@ fun LiveMapScreen(
                                 webCenterLat = pragueCenter.latitude
                                 webCenterLon = pragueCenter.longitude
                                 webZoom = 12.5f
-                                scope.launch {
-                                    cameraPositionState.animate(
-                                        CameraUpdateFactory.newLatLngZoom(pragueCenter, 12.5f)
-                                    )
-                                }
+                                animateCameraIfGoogleMap(pragueCenter, 12.5f)
                             },
                             label = { Text("📍 Praha", color = Color.White, fontSize = 11.sp) }
                         )
@@ -377,11 +378,7 @@ fun LiveMapScreen(
                                 webCenterLat = mbCenter.latitude
                                 webCenterLon = mbCenter.longitude
                                 webZoom = 13.5f
-                                scope.launch {
-                                    cameraPositionState.animate(
-                                        CameraUpdateFactory.newLatLngZoom(mbCenter, 13.5f)
-                                    )
-                                }
+                                animateCameraIfGoogleMap(mbCenter, 13.5f)
                             },
                             label = { Text("🚌 Mladá Boleslav", color = Color.White, fontSize = 11.sp) }
                         )
@@ -400,13 +397,15 @@ fun LiveMapScreen(
                                     webCenterLat = (minLat + maxLat) / 2.0
                                     webCenterLon = (minLon + maxLon) / 2.0
                                     webZoom = 12f
-                                    val bounds = LatLngBounds(
-                                        LatLng(minLat, minLon),
-                                        LatLng(maxLat, maxLon)
-                                    )
-                                    scope.launch {
-                                        runCatching {
-                                            cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 120))
+                                    if (displayMode == MapDisplayMode.GOOGLE_SDK) {
+                                        val bounds = LatLngBounds(
+                                            LatLng(minLat, minLon),
+                                            LatLng(maxLat, maxLon)
+                                        )
+                                        scope.launch {
+                                            runCatching {
+                                                cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 120))
+                                            }
                                         }
                                     }
                                 },
@@ -455,22 +454,22 @@ fun LiveMapScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Nativní Google SDK vyžaduje Maps SDK pro Android",
+                                text = "Nativní Google SDK vyžaduje Maps SDK pro Android klíč",
                                 color = Color(0xFFFDE68A),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp
                             )
                             Text(
-                                text = "Režim „Webová mapa“ funguje okamžitě a bez omezení.",
+                                text = "Režimy „Mapa (OSM)“ a „120Hz Radar“ fungují zdarma a bez omezení.",
                                 color = Color.White.copy(alpha = 0.75f),
                                 fontSize = 11.sp
                             )
                         }
                         TextButton(
-                            onClick = { displayMode = MapDisplayMode.GOOGLE_WEB },
+                            onClick = { displayMode = MapDisplayMode.OPEN_STREET_MAP },
                             colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF38BDF8))
                         ) {
-                            Text("Webová mapa", fontWeight = FontWeight.Bold)
+                            Text("Mapa (OSM)", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -490,11 +489,10 @@ fun LiveMapScreen(
                 VehicleTelemetryCard(
                     vehicle = vehicle,
                     onSelect = {
-                        scope.launch {
-                            cameraPositionState.animate(
-                                CameraUpdateFactory.newLatLngZoom(LatLng(vehicle.lat, vehicle.lon), 15.5f)
-                            )
-                        }
+                        webCenterLat = vehicle.lat
+                        webCenterLon = vehicle.lon
+                        webZoom = 15.5f
+                        animateCameraIfGoogleMap(LatLng(vehicle.lat, vehicle.lon), 15.5f)
                     }
                 )
             }
@@ -643,8 +641,7 @@ private fun DynamicTelemetryRadar(
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun WebGoogleMap(
-    apiKey: String,
+private fun WebOsmMap(
     vehicles: List<LiveVehicleMarker>,
     userLat: Double?,
     userLon: Double?,
@@ -667,10 +664,11 @@ private fun WebGoogleMap(
         <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
             <style>
                 html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0b1120; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+                .leaflet-tile { filter: brightness(0.65) invert(1) contrast(3) hue-rotate(200deg) saturate(0.35); }
                 .bus-marker {
                     display: flex;
                     align-items: center;
@@ -681,7 +679,7 @@ private fun WebGoogleMap(
                     font-size: 11px;
                     color: #ffffff;
                     border: 2px solid rgba(255, 255, 255, 0.9);
-                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
                     white-space: nowrap;
                 }
                 .bus-green { background: #16a34a; }
@@ -740,52 +738,56 @@ private fun WebGoogleMap(
                     white-space: nowrap;
                 }
                 .leaflet-popup-content-wrapper {
-                    background: rgba(15, 23, 42, 0.94);
+                    background: rgba(15, 23, 42, 0.95);
                     color: white;
-                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border: 1px solid rgba(255, 255, 255, 0.25);
                     backdrop-filter: blur(12px);
                     border-radius: 14px;
                     font-size: 12px;
                 }
                 .leaflet-popup-tip {
-                    background: rgba(15, 23, 42, 0.94);
+                    background: rgba(15, 23, 42, 0.95);
                 }
             </style>
         </head>
         <body>
             <div id="map"></div>
             <script>
-                var map = L.map('map', { zoomControl: false, attributionControl: false })
-                    .setView([$centerLat, $centerLon], ${zoom.toInt()});
-                
-                // CartoDB Dark Matter tiles (velmi rychlé, tmavé, dokonale ladící s Liquid Glass)
-                var baseTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                    subdomains: 'abcd',
-                    maxZoom: 19
-                }).addTo(map);
-
-                baseTileLayer.on('tileerror', function() {
-                    if (!window.osmFallbackAdded) {
-                        window.osmFallbackAdded = true;
-                        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+                function startMap() {
+                    if (typeof L === 'undefined') {
+                        setTimeout(startMap, 100);
+                        return;
                     }
-                });
+                    window.map = L.map('map', { zoomControl: false, attributionControl: false })
+                        .setView([$centerLat, $centerLon], ${zoom.toInt()});
+                    
+                    // Bezplatné standardní OpenStreetMap dlaždice (bez API klíče, 100% spolehlivé)
+                    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        maxZoom: 19
+                    }).addTo(window.map);
 
-                var markers = {};
-                var parkingsLayer = L.layerGroup().addTo(map);
-                var bikesLayer = L.layerGroup().addTo(map);
-                var userMarker = null;
+                    window.markers = {};
+                    window.parkingsLayer = L.layerGroup().addTo(window.map);
+                    window.bikesLayer = L.layerGroup().addTo(window.map);
+                    window.userMarker = null;
 
-                function updateUserLocation(lat, lng) {
+                    if (window._pendingUserLoc) updateUserLocation(window._pendingUserLoc[0], window._pendingUserLoc[1]);
+                    if (window._pendingVehicles) updateVehicles(window._pendingVehicles);
+                    if (window._pendingParkings) updateParkings(window._pendingParkings[0], window._pendingParkings[1]);
+                    if (window._pendingBikes) updateBikes(window._pendingBikes[0], window._pendingBikes[1]);
+                }
+
+                window.updateUserLocation = function(lat, lng) {
+                    if (!window.map) { window._pendingUserLoc = [lat, lng]; return; }
                     if (lat == null || lng == null) {
-                        if (userMarker) {
-                            map.removeLayer(userMarker);
-                            userMarker = null;
+                        if (window.userMarker) {
+                            window.map.removeLayer(window.userMarker);
+                            window.userMarker = null;
                         }
                         return;
                     }
-                    if (userMarker) {
-                        userMarker.setLatLng([lat, lng]);
+                    if (window.userMarker) {
+                        window.userMarker.setLatLng([lat, lng]);
                     } else {
                         var icon = L.divIcon({
                             className: 'user-marker',
@@ -793,12 +795,13 @@ private fun WebGoogleMap(
                             iconSize: [24, 24],
                             iconAnchor: [12, 12]
                         });
-                        userMarker = L.marker([lat, lng], { icon: icon, zIndexOffset: 2000 }).addTo(map)
+                        window.userMarker = L.marker([lat, lng], { icon: icon, zIndexOffset: 2000 }).addTo(window.map)
                             .bindPopup('<b>Vaše aktuální GPS poloha</b>');
                     }
-                }
+                };
 
-                function updateVehicles(list) {
+                window.updateVehicles = function(list) {
+                    if (!window.map) { window._pendingVehicles = list; return; }
                     var currentIds = {};
                     for (var i = 0; i < list.length; i++) {
                         var v = list[i];
@@ -820,25 +823,26 @@ private fun WebGoogleMap(
                             'Rychlost: ' + Math.round(v.speed) + ' km/h' +
                             '</div></div>';
 
-                        if (markers[v.id]) {
-                            markers[v.id].setLatLng([v.lat, v.lng]);
-                            markers[v.id].setIcon(icon);
+                        if (window.markers[v.id]) {
+                            window.markers[v.id].setLatLng([v.lat, v.lng]);
+                            window.markers[v.id].setIcon(icon);
                         } else {
-                            markers[v.id] = L.marker([v.lat, v.lng], { icon: icon })
-                                .addTo(map)
+                            window.markers[v.id] = L.marker([v.lat, v.lng], { icon: icon })
+                                .addTo(window.map)
                                 .bindPopup(popupContent);
                         }
                     }
-                    for (var id in markers) {
+                    for (var id in window.markers) {
                         if (!currentIds[id]) {
-                            map.removeLayer(markers[id]);
-                            delete markers[id];
+                            window.map.removeLayer(window.markers[id]);
+                            delete window.markers[id];
                         }
                     }
-                }
+                };
 
-                function updateParkings(show, list) {
-                    parkingsLayer.clearLayers();
+                window.updateParkings = function(show, list) {
+                    if (!window.map) { window._pendingParkings = [show, list]; return; }
+                    window.parkingsLayer.clearLayers();
                     if (!show || !list) return;
                     for (var i = 0; i < list.length; i++) {
                         var p = list[i];
@@ -849,13 +853,14 @@ private fun WebGoogleMap(
                             iconAnchor: [21, 9]
                         });
                         L.marker([p.lat, p.lng], { icon: icon })
-                            .addTo(parkingsLayer)
+                            .addTo(window.parkingsLayer)
                             .bindPopup('<b>P+R ' + p.name + '</b><br>Volno: ' + p.free + ' / ' + p.total);
                     }
-                }
+                };
 
-                function updateBikes(show, list) {
-                    bikesLayer.clearLayers();
+                window.updateBikes = function(show, list) {
+                    if (!window.map) { window._pendingBikes = [show, list]; return; }
+                    window.bikesLayer.clearLayers();
                     if (!show || !list) return;
                     for (var i = 0; i < list.length; i++) {
                         var b = list[i];
@@ -866,14 +871,16 @@ private fun WebGoogleMap(
                             iconAnchor: [20, 9]
                         });
                         L.marker([b.lat, b.lng], { icon: icon })
-                            .addTo(bikesLayer)
+                            .addTo(window.bikesLayer)
                             .bindPopup('<b>' + b.provider + ': ' + b.name + '</b><br>Volných kol: ' + b.free);
                     }
-                }
+                };
 
-                function panToCoords(lat, lng, z) {
-                    map.flyTo([lat, lng], z || 14, { duration: 0.8 });
-                }
+                window.panToCoords = function(lat, lng, z) {
+                    if (window.map) window.map.flyTo([lat, lng], z || 14, { duration: 0.8 });
+                };
+
+                startMap();
             </script>
         </body>
         </html>
@@ -892,13 +899,19 @@ private fun WebGoogleMap(
                 settings.domStorageEnabled = true
                 settings.loadWithOverviewMode = true
                 settings.useWideViewPort = true
+                settings.allowFileAccess = true
+                settings.allowContentAccess = true
+                settings.databaseEnabled = true
+                settings.cacheMode = WebSettings.LOAD_DEFAULT
+                settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                webChromeClient = WebChromeClient()
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         isReady = true
                     }
                 }
-                loadDataWithBaseURL("https://pid-golemio-map.internal", html, "text/html", "UTF-8", null)
+                loadDataWithBaseURL("https://cdnjs.cloudflare.com", html, "text/html", "UTF-8", null)
                 webViewInstance = this
             }
         },
