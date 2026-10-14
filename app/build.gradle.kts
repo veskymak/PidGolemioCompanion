@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,20 +8,21 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    FileInputStream(localPropertiesFile).use { stream ->
+        localProperties.load(stream)
+    }
+}
+val mapsKey: String = (localProperties.getProperty("MAPS_API_KEY")
+    ?: (project.findProperty("MAPS_API_KEY") as? String)
+    ?: System.getenv("MAPS_API_KEY")
+    ?: "").trim()
+
 android {
     namespace = "cz.pid.golemiocompanion"
     compileSdk = 35
-
-    val localProperties = java.util.Properties().apply {
-        val file = rootProject.file("local.properties")
-        if (file.exists()) {
-            file.inputStream().use { input -> this.load(input) }
-        }
-    }
-    val mapsKey = (localProperties.getProperty("MAPS_API_KEY")
-        ?: (project.findProperty("MAPS_API_KEY") as? String)
-        ?: System.getenv("MAPS_API_KEY")
-        ?: "").trim()
 
     defaultConfig {
         applicationId = "cz.pid.golemiocompanion"
