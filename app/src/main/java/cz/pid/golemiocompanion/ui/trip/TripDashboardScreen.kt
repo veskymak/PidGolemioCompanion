@@ -156,7 +156,8 @@ fun TripDashboardScreen(
                     text = "Nejbližší odjezdy • ${uiState.stopSearchQuery}",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
+                    fontSize = 16.sp,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
                 if (uiState.isLoading) {
                     CircularProgressIndicator(
@@ -164,7 +165,28 @@ fun TripDashboardScreen(
                         strokeWidth = 2.dp,
                         color = Color(0xFF60A5FA)
                     )
+                } else {
+                    Text(
+                        text = if (uiState.isLiveData) "● LIVE Golemio" else "DEMO data",
+                        color = if (uiState.isLiveData) Color(0xFF4ADE80) else Color(0xFFFBBF24),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
                 }
+            }
+        }
+
+        uiState.departuresError?.let { error ->
+            item(key = "departures_error") {
+                Text(
+                    text = error,
+                    color = Color(0xFFFCA5A5),
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .liquidGlass(cornerRadius = 18.dp)
+                        .padding(14.dp)
+                )
             }
         }
 

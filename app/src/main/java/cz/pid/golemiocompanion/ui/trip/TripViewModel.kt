@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import cz.pid.golemiocompanion.data.local.LabPreferencesRepository
 import cz.pid.golemiocompanion.domain.model.*
 import cz.pid.golemiocompanion.domain.repository.GolemioRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -32,7 +33,9 @@ data class TripUiState(
     val mapSharedBikes: List<SharedBikeStation> = emptyList(),
     val showParkingsLayer: Boolean = true,
     val showBikesLayer: Boolean = true,
-    val mapLineFilter: String = ""
+    val mapLineFilter: String = "",
+    val departuresError: String? = null,
+    val isLiveData: Boolean = false
 )
 
 class TripViewModel(
@@ -55,11 +58,33 @@ class TripViewModel(
     private var tickerJob: Job? = null
     private var pollingJob: Job? = null
     private var mapPollingJob: Job? = null
+    private var refreshJob: Job? = null
 
     init {
-        refreshStopData()
+        observeApiKeyChanges()
         startIndependentCountdownTicker()
         startLiveMapPolling()
+    }
+
+    /**
+     * Always read the latest persisted settings directly from DataStore.
+     * [labSettingsFlow].value may still hold a stale (or initial empty) value right after
+     * the API key is saved or right after app start.
+     */
+    private suspend fun currentLabSettings(): LabSettingsState =
+        preferencesRepository.labSettingsFlow.first()
+
+    /** Reloads departures + map layers on start and whenever the API key changes. */
+    private fun observeApiKeyChanges() {
+        viewModelScope.launch {
+            preferencesRepository.labSettingsFlow
+                .map { it.golemioApiKey }
+                .distinctUntilChanged()
+                .collect {
+                    refreshStopData()
+                    refreshMapLayersNow()
+                }
+        }
     }
 
     fun onStopQueryChanged(query: String) {
@@ -71,28 +96,37 @@ class TripViewModel(
     }
 
     fun refreshStopData() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, departuresError = null) }
             val currentState = _uiState.value
-            val lab = labSettingsFlow.value
+            val lab = currentLabSettings()
 
-            val weatherDeferred = async {
-                repository.getAirQualityAndWeather(50.0715, 14.4035, lab.golemioApiKey)
+            val weather = repository.getAirQualityAndWeather(50.0715, 14.4035, lab.golemioApiKey)
+
+            val result = runCatching {
+                repository.getDeparturesForStop(
+                    stopQuery = currentState.stopSearchQuery,
+                    lineFilter = currentState.lineFilterQuery,
+                    labSettings = lab,
+                    currentWeather = weather
+                )
             }
-            val weather = weatherDeferred.await()
+            if (result.exceptionOrNull() is CancellationException) return@launch
 
-            val connections = repository.getDeparturesForStop(
-                stopQuery = currentState.stopSearchQuery,
-                lineFilter = currentState.lineFilterQuery,
-                labSettings = lab,
-                currentWeather = weather
-            )
+            val connections = result.getOrDefault(emptyList())
+            val error = result.exceptionOrNull()?.let { it.message ?: "Neznámá chyba při načítání odjezdů." }
+                ?: if (lab.golemioApiKey.isNotBlank() && connections.isEmpty()) {
+                    "Pro zastávku „${currentState.stopSearchQuery}“ nejsou v příští hodině žádné odjezdy."
+                } else null
 
             _uiState.update {
                 it.copy(
                     isLoading = false,
                     departures = connections,
-                    weatherAndAqi = weather
+                    weatherAndAqi = weather,
+                    departuresError = error,
+                    isLiveData = lab.golemioApiKey.isNotBlank() && result.isSuccess
                 )
             }
         }
@@ -127,15 +161,20 @@ class TripViewModel(
     fun onActionMissedConnection() {
         val currentMode = _uiState.value.trackingMode
         val missedConn = extractActiveConnection(currentMode) ?: return
-        val lab = labSettingsFlow.value
-
         viewModelScope.launch {
-            val allDepartures = repository.getDeparturesForStop(
-                stopQuery = missedConn.stopName,
-                lineFilter = missedConn.routeShortName,
-                labSettings = lab,
-                currentWeather = _uiState.value.weatherAndAqi
-            )
+            val lab = currentLabSettings()
+            val allDepartures = try {
+                repository.getDeparturesForStop(
+                    stopQuery = missedConn.stopName,
+                    lineFilter = missedConn.routeShortName,
+                    labSettings = lab,
+                    currentWeather = _uiState.value.weatherAndAqi
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
 
             val nowMs = System.currentTimeMillis()
             val nextSameLineConn = allDepartures.firstOrNull {
@@ -241,7 +280,7 @@ class TripViewModel(
 
     private fun refreshMapLayersNow() {
         viewModelScope.launch {
-            val lab = labSettingsFlow.value
+            val lab = currentLabSettings()
             val filter = _uiState.value.mapLineFilter
             val vehiclesDeferred = async { repository.getLiveVehicles(filter, lab) }
             val parkingsDeferred = async { repository.getParkingsPR(lab.golemioApiKey) }
@@ -268,6 +307,7 @@ class TripViewModel(
     fun onApiKeyUpdated(newKey: String) {
         viewModelScope.launch {
             preferencesRepository.updateApiKey(newKey)
+            // refreshStopData() reads the key straight from DataStore, so it sees the new value.
             refreshStopData()
             refreshMapLayersNow()
         }
@@ -315,14 +355,20 @@ class TripViewModel(
                 delay(8_000L)
                 val currentMode = _uiState.value.trackingMode
                 val activeConn = extractActiveConnection(currentMode) ?: break
-                val lab = labSettingsFlow.value
+                val lab = currentLabSettings()
 
-                val latestList = repository.getDeparturesForStop(
-                    stopQuery = activeConn.stopName,
-                    lineFilter = activeConn.routeShortName,
-                    labSettings = lab,
-                    currentWeather = _uiState.value.weatherAndAqi
-                )
+                val latestList = try {
+                    repository.getDeparturesForStop(
+                        stopQuery = activeConn.stopName,
+                        lineFilter = activeConn.routeShortName,
+                        labSettings = lab,
+                        currentWeather = _uiState.value.weatherAndAqi
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    emptyList()
+                }
 
                 val matchedFromApi = latestList.find { it.tripId == tripId }
                 val updatedConnection = if (matchedFromApi != null) {

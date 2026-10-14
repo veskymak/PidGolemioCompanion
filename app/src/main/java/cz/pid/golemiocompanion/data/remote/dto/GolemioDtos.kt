@@ -21,12 +21,12 @@ data class PidStopDto(
 
 @Serializable
 data class PidDepartureDto(
-    @SerialName("arrival_timestamp") val arrivalTimestamp: PidTimestampDto,
-    @SerialName("departure_timestamp") val departureTimestamp: PidTimestampDto,
+    @SerialName("arrival_timestamp") val arrivalTimestamp: PidTimestampDto = PidTimestampDto(),
+    @SerialName("departure_timestamp") val departureTimestamp: PidTimestampDto = PidTimestampDto(),
     @SerialName("delay") val delay: PidDelayDto? = null,
-    @SerialName("route") val route: PidRouteDto,
-    @SerialName("trip") val trip: PidTripDto,
-    @SerialName("stop") val stop: PidDepartureStopRefDto,
+    @SerialName("route") val route: PidRouteDto = PidRouteDto(),
+    @SerialName("trip") val trip: PidTripDto = PidTripDto(),
+    @SerialName("stop") val stop: PidDepartureStopRefDto = PidDepartureStopRefDto(),
     @SerialName("last_stop") val lastStop: PidLastStopDto? = null
 )
 
