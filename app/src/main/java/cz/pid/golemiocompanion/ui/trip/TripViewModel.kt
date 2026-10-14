@@ -35,7 +35,8 @@ data class TripUiState(
     val showBikesLayer: Boolean = true,
     val mapLineFilter: String = "",
     val departuresError: String? = null,
-    val isLiveData: Boolean = false
+    val isLiveData: Boolean = false,
+    val isApiKeyConfigured: Boolean = false
 )
 
 class TripViewModel(
@@ -80,7 +81,8 @@ class TripViewModel(
             preferencesRepository.labSettingsFlow
                 .map { it.golemioApiKey }
                 .distinctUntilChanged()
-                .collect {
+                .collect { apiKey ->
+                    _uiState.update { it.copy(isApiKeyConfigured = apiKey.isNotBlank()) }
                     refreshStopData()
                     refreshMapLayersNow()
                 }
@@ -117,7 +119,11 @@ class TripViewModel(
             val connections = result.getOrDefault(emptyList())
             val error = result.exceptionOrNull()?.let { it.message ?: "Neznámá chyba při načítání odjezdů." }
                 ?: if (lab.golemioApiKey.isNotBlank() && connections.isEmpty()) {
-                    "Pro zastávku „${currentState.stopSearchQuery}“ nejsou v příští hodině žádné odjezdy."
+                    if (currentState.lineFilterQuery.isNotBlank()) {
+                        "Pro zastávku „${currentState.stopSearchQuery}“ s filtrem linky „${currentState.lineFilterQuery}“ nebyly nalezeny žádné odjezdy."
+                    } else {
+                        "Pro zastávku „${currentState.stopSearchQuery}“ nejsou v příští hodině žádné odjezdy."
+                    }
                 } else null
 
             _uiState.update {
@@ -126,7 +132,8 @@ class TripViewModel(
                     departures = connections,
                     weatherAndAqi = weather,
                     departuresError = error,
-                    isLiveData = lab.golemioApiKey.isNotBlank() && result.isSuccess
+                    isLiveData = lab.golemioApiKey.isNotBlank() && result.isSuccess && connections.isNotEmpty(),
+                    isApiKeyConfigured = lab.golemioApiKey.isNotBlank()
                 )
             }
         }
@@ -309,6 +316,13 @@ class TripViewModel(
             preferencesRepository.updateApiKey(newKey)
             // refreshStopData() reads the key straight from DataStore, so it sees the new value.
             refreshStopData()
+            refreshMapLayersNow()
+        }
+    }
+
+    fun onGoogleMapsApiKeyUpdated(newKey: String) {
+        viewModelScope.launch {
+            preferencesRepository.updateGoogleMapsApiKey(newKey)
             refreshMapLayersNow()
         }
     }

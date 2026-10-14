@@ -107,6 +107,23 @@ fun TripDashboardScreen(
                         onValueChange = viewModel::onStopQueryChanged,
                         label = { Text("Zastávka PID (např. Mladá Boleslav)", color = Color.White.copy(alpha = 0.7f)) },
                         singleLine = true,
+                        trailingIcon = {
+                            if (uiState.stopSearchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = {
+                                        viewModel.onStopQueryChanged("")
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Vymazat zastávku",
+                                        tint = Color.White.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
@@ -121,6 +138,24 @@ fun TripDashboardScreen(
                         onValueChange = viewModel::onLineFilterChanged,
                         label = { Text("Linka", color = Color.White.copy(alpha = 0.7f)) },
                         singleLine = true,
+                        trailingIcon = {
+                            if (uiState.lineFilterQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = {
+                                        viewModel.onLineFilterChanged("")
+                                        viewModel.refreshStopData()
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Vymazat filtr linky",
+                                        tint = Color.White.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
@@ -150,8 +185,8 @@ fun TripDashboardScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     val presets = listOf(
-                        "Mladá Boleslav, aut.st." to "🚌 MB aut.st.",
-                        "Mladá Boleslav, žel.st." to "🚆 MB žel.st.",
+                        "Mladá Boleslav, aut. st." to "🚌 MB aut. st.",
+                        "Mladá Boleslav, hl.nádr." to "🚆 MB hl.nádr.",
                         "Černý Most" to "🚌 Černý Most",
                         "Anděl" to "📍 Anděl",
                         "Hlavní nádraží" to "🚆 Praha hl.n.",
@@ -182,9 +217,10 @@ fun TripDashboardScreen(
                 val queryNorm = uiState.stopSearchQuery.lowercase()
                 if (queryNorm.contains("boles") || queryNorm.contains("mlad") || queryNorm == "mb") {
                     val mbStops = listOf(
-                        "Mladá Boleslav, aut.st.",
-                        "Mladá Boleslav, žel.st.",
-                        "Mladá Boleslav, nám.Republiky",
+                        "Mladá Boleslav, aut. st.",
+                        "Mladá Boleslav, hl.nádr.",
+                        "Mladá Boleslav, město",
+                        "Mladá Boleslav, nám. Republiky",
                         "Mladá Boleslav, Václava Klementa",
                         "Mladá Boleslav, U Sportu",
                         "Mladá Boleslav, Kosmonosy"
@@ -240,9 +276,19 @@ fun TripDashboardScreen(
                         color = Color(0xFF60A5FA)
                     )
                 } else {
+                    val badgeText = when {
+                        uiState.isLiveData -> "● LIVE Golemio"
+                        uiState.isApiKeyConfigured -> "● Golemio API"
+                        else -> "DEMO data"
+                    }
+                    val badgeColor = when {
+                        uiState.isLiveData -> Color(0xFF4ADE80)
+                        uiState.isApiKeyConfigured -> Color(0xFF38BDF8)
+                        else -> Color(0xFFFBBF24)
+                    }
                     Text(
-                        text = if (uiState.isLiveData) "● LIVE Golemio" else "DEMO data",
-                        color = if (uiState.isLiveData) Color(0xFF4ADE80) else Color(0xFFFBBF24),
+                        text = badgeText,
+                        color = badgeColor,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
@@ -255,6 +301,24 @@ fun TripDashboardScreen(
                 Text(
                     text = error,
                     color = Color(0xFFFCA5A5),
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .liquidGlass(cornerRadius = 18.dp)
+                        .padding(14.dp)
+                )
+            }
+        }
+
+        if (uiState.departures.isEmpty() && uiState.departuresError == null && !uiState.isLoading) {
+            item(key = "departures_empty") {
+                Text(
+                    text = if (uiState.lineFilterQuery.isNotBlank()) {
+                        "Pro linku ${uiState.lineFilterQuery} nebyly na zastávce „${uiState.stopSearchQuery}“ nalezeny žádné odjezdy v příští hodině."
+                    } else {
+                        "Pro zastávku „${uiState.stopSearchQuery}“ nebyly nalezeny žádné odjezdy v příští hodině."
+                    },
+                    color = Color.White.copy(alpha = 0.7f),
                     fontSize = 14.sp,
                     modifier = Modifier
                         .fillMaxWidth()

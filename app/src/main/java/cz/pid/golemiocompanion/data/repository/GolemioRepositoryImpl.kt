@@ -35,6 +35,7 @@ class GolemioRepositoryImpl(
         if (labSettings.golemioApiKey.isNotBlank()) {
             val candidateStops = resolveStopQueries(stopQuery.trim().ifBlank { "Anděl" })
             var lastError: Throwable? = null
+            var fallbackDeparturesWithoutFilter: List<StopConnection>? = null
 
             for (candidate in candidateStops) {
                 try {
@@ -43,12 +44,11 @@ class GolemioRepositoryImpl(
                         stopNames = listOf(candidate)
                     )
 
-                    // If the API returned anything useful, build and return the result immediately
                     if (res.departures.isNotEmpty() || res.stops.isNotEmpty()) {
                         val stopsById = res.stops.associateBy { it.stopId }
                         val primaryStop = res.stops.firstOrNull()
 
-                        return res.departures.map { dto ->
+                        val mapped = res.departures.map { dto ->
                             val depStop = stopsById[dto.stop.id] ?: primaryStop
                             val scheduledMs = parseIsoTimestampToEpochMs(dto.departureTimestamp.scheduled, nowMs + 90_000L)
                             val officialDelaySec = dto.delay?.seconds ?: ((dto.delay?.minutes ?: 0) * 60)
@@ -64,7 +64,7 @@ class GolemioRepositoryImpl(
                                 routeShortName = dto.route.shortName,
                                 routeType = dto.route.type,
                                 headsign = dto.trip.headsign,
-                                stopName = depStop?.stopName?.ifBlank { null } ?: stopQuery,
+                                stopName = depStop?.stopName?.ifBlank { null } ?: candidate,
                                 platformCode = dto.stop.platformCode ?: depStop?.platformCode ?: "-",
                                 stopLat = depStop?.stopLat ?: 50.0715,
                                 stopLon = depStop?.stopLon ?: 14.4035,
@@ -78,11 +78,17 @@ class GolemioRepositoryImpl(
                                 isAirConditioned = dto.trip.isAirConditioned ?: true,
                                 isWheelchairAccessible = dto.trip.isWheelchairAccessible
                             )
+                        }.distinctBy { it.tripId }
+
+                        val filtered = mapped.filter { conn ->
+                            lineFilter.isNullOrBlank() || conn.routeShortName.equals(lineFilter.trim(), ignoreCase = true)
                         }
-                            .distinctBy { it.tripId }
-                            .filter { conn ->
-                                lineFilter.isNullOrBlank() || conn.routeShortName.equals(lineFilter.trim(), ignoreCase = true)
-                            }
+
+                        if (filtered.isNotEmpty()) {
+                            return filtered
+                        } else if (fallbackDeparturesWithoutFilter == null && mapped.isNotEmpty()) {
+                            fallbackDeparturesWithoutFilter = mapped
+                        }
                     }
                 } catch (e: HttpException) {
                     lastError = e
@@ -105,10 +111,15 @@ class GolemioRepositoryImpl(
                 }
             }
 
+            // If a candidate stop was found and had departures, but the line filter matched none of them
+            if (fallbackDeparturesWithoutFilter != null && !lineFilter.isNullOrBlank()) {
+                return emptyList()
+            }
+
             // If none of the candidates returned a useful response, fail with a user-friendly message
             val isRegional = candidateStops.any { it.contains("Boleslav") }
             val errorMsg = if (isRegional) {
-                "Zastávka „${stopQuery.trim()}“ nebyla v PID nalezena. V Mladé Boleslavi zkuste zadat „Mladá Boleslav, aut.st.“ nebo „Mladá Boleslav, žel.st.“."
+                "Zastávka „${stopQuery.trim()}“ nebyla v PID nalezena. Zkuste zvolit „Mladá Boleslav, aut. st.“ nebo „Mladá Boleslav, hl.nádr.“ z tlačítek níže."
             } else {
                 "Zastávka „${stopQuery.trim()}“ nebyla v PID nalezena. Zadejte přesný název zastávky."
             }
@@ -583,20 +594,65 @@ class GolemioRepositoryImpl(
             .replace("\\p{InCombiningDiacriticalMarks}+".toRegex(), "")
             .lowercase()
 
-        return when {
-            clean.contains(",") -> listOf(clean)
-            normalized.contains("boleslav") || normalized.contains("mlad") || normalized == "mb" -> listOf(
-                "Mladá Boleslav, aut.st.",
-                "Mladá Boleslav, žel.st.",
-                "Mladá Boleslav, nám.Republiky",
-                "Mladá Boleslav, Václava Klementa",
-                clean
-            )
-            normalized == "cerny most" || normalized == "cernak" -> listOf("Černý Most", clean)
-            normalized == "hlavni nadrazi" || normalized == "hlavak" -> listOf("Hlavní nádraží", clean)
-            normalized == "smichovske nadrazi" || normalized == "smichov" -> listOf("Smíchovské nádraží", clean)
-            normalized == "andel" -> listOf("Anděl", clean)
-            else -> listOf(clean, "$clean, aut.st.", "$clean, žel.st.", "$clean, náměstí")
+        val list = mutableListOf<String>()
+
+        // 1. Raw input as first candidate
+        list.add(clean)
+
+        // 2. Specific normalizations for Mladá Boleslav
+        if (normalized.contains("boleslav") || normalized.contains("mlad") || normalized == "mb") {
+            if (normalized.contains("zel") || normalized.contains("vlak") || normalized.contains("hl") || normalized.contains("nadr")) {
+                list.add("Mladá Boleslav, hl.nádr.")
+                list.add("Mladá Boleslav hl. n.")
+                list.add("Mladá Boleslav hl.n.")
+                list.add("Mladá Boleslav, hl.n.")
+                list.add("Mladá Boleslav, město")
+                list.add("Mladá Boleslav město")
+                list.add("Mladá Boleslav, aut. st.")
+            } else if (normalized.contains("aut") || normalized.contains("bus") || normalized.contains("st")) {
+                list.add("Mladá Boleslav, aut. st.")
+                list.add("Mladá Boleslav, aut.st.")
+                list.add("Mladá Boleslav aut. st.")
+                list.add("Mladá Boleslav aut.st.")
+                list.add("Mladá Boleslav, hl.nádr.")
+            } else {
+                list.add("Mladá Boleslav, aut. st.")
+                list.add("Mladá Boleslav, aut.st.")
+                list.add("Mladá Boleslav, hl.nádr.")
+                list.add("Mladá Boleslav hl. n.")
+                list.add("Mladá Boleslav, Václava Klementa")
+                list.add("Mladá Boleslav, nám. Republiky")
+                list.add("Mladá Boleslav, U Sportu")
+            }
         }
+
+        // Punctuation & space variations: "aut.st." <-> "aut. st."
+        if (clean.contains("aut.st", ignoreCase = true)) {
+            list.add(clean.replace("aut.st.", "aut. st.", ignoreCase = true))
+            list.add(clean.replace("aut.st", "aut. st.", ignoreCase = true))
+        }
+        if (clean.contains("aut. st", ignoreCase = true)) {
+            list.add(clean.replace("aut. st.", "aut.st.", ignoreCase = true))
+            list.add(clean.replace("aut. st", "aut.st.", ignoreCase = true))
+        }
+        if (clean.contains("žel.st", ignoreCase = true) || clean.contains("zel.st", ignoreCase = true)) {
+            list.add(clean.replace("žel.st.", "hl.nádr.", ignoreCase = true))
+            list.add(clean.replace("žel.st", "hl.nádr.", ignoreCase = true))
+            list.add(clean.replace("žel.st.", "aut. st.", ignoreCase = true))
+        }
+        if (clean.contains("nám.Republiky", ignoreCase = true)) {
+            list.add(clean.replace("nám.Republiky", "nám. Republiky", ignoreCase = true))
+        }
+
+        // 3. Fallbacks for other regional towns without comma
+        if (!clean.contains(",")) {
+            list.add("$clean, aut. st.")
+            list.add("$clean, aut.st.")
+            list.add("$clean, hl.nádr.")
+            list.add("$clean, žel.st.")
+            list.add("$clean, náměstí")
+        }
+
+        return list.distinct()
     }
 }

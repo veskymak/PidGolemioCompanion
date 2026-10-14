@@ -1,5 +1,8 @@
 package cz.pid.golemiocompanion.ui.map
 
+import android.annotation.SuppressLint
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -19,6 +22,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
@@ -32,14 +36,31 @@ import cz.pid.golemiocompanion.ui.components.liquidGlass
 import cz.pid.golemiocompanion.ui.trip.TripViewModel
 import kotlinx.coroutines.launch
 
+enum class MapDisplayMode(val label: String) {
+    GOOGLE_WEB("Google Web"),
+    GOOGLE_SDK("Google SDK"),
+    RADAR("120Hz Radar")
+}
+
 @Composable
 fun LiveMapScreen(
     viewModel: TripViewModel,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var useTacticalRadarCanvas by remember { mutableStateOf(false) }
+    val labSettings by viewModel.labSettingsFlow.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+
+    val effectiveMapsKey = remember(labSettings.googleMapsApiKey) {
+        labSettings.googleMapsApiKey.ifBlank { BuildConfig.MAPS_API_KEY }.trim()
+    }
+    val isMapsKeyConfigured = remember(effectiveMapsKey) {
+        effectiveMapsKey.isNotBlank() && !effectiveMapsKey.contains("YOUR_GOOGLE_MAPS_API_KEY")
+    }
+
+    var displayMode by remember {
+        mutableStateOf(MapDisplayMode.GOOGLE_WEB)
+    }
 
     val pragueCenter = remember { LatLng(50.0755, 14.4178) }
     val mbCenter = remember { LatLng(50.4114, 14.9032) }
@@ -47,68 +68,79 @@ fun LiveMapScreen(
         position = CameraPosition.fromLatLngZoom(pragueCenter, 12.5f)
     }
 
-    val isMapsKeyConfigured = remember {
-        BuildConfig.MAPS_API_KEY.isNotBlank() &&
-            !BuildConfig.MAPS_API_KEY.contains("YOUR_GOOGLE_MAPS_API_KEY")
-    }
+    var webCenterLat by remember { mutableDoubleStateOf(50.0755) }
+    var webCenterLon by remember { mutableDoubleStateOf(14.4178) }
+    var webZoom by remember { mutableFloatStateOf(12.5f) }
 
     Box(modifier = modifier.fillMaxSize()) {
-        if (!useTacticalRadarCanvas) {
-            GoogleMap(
-                modifier = Modifier.fillMaxSize(),
-                cameraPositionState = cameraPositionState,
-                uiSettings = MapUiSettings(zoomControlsEnabled = false)
-            ) {
-                uiState.liveVehicles.forEach { vehicle ->
-                    val markerHue = when {
-                        vehicle.delaySeconds <= 30 -> BitmapDescriptorFactory.HUE_AZURE
-                        vehicle.delaySeconds <= 120 -> BitmapDescriptorFactory.HUE_YELLOW
-                        else -> BitmapDescriptorFactory.HUE_RED
-                    }
-                    Marker(
-                        state = MarkerState(position = LatLng(vehicle.lat, vehicle.lon)),
-                        title = "Linka ${vehicle.routeShortName} → ${vehicle.headsign}",
-                        snippet = buildString {
-                            append("Zpoždění: ${vehicle.delaySeconds} s • ${vehicle.speedKmh.toInt()} km/h")
-                            if (vehicle.isDeadReckoningEstimated) append(" [DEAD RECKONING]")
-                            if (vehicle.isFromRawInputGateway) append(" [RAW STREAM]")
-                        },
-                        icon = BitmapDescriptorFactory.defaultMarker(markerHue),
-                        rotation = vehicle.bearing
-                    )
-                }
-
-                if (uiState.showParkingsLayer) {
-                    uiState.parkingsPR.forEach { pr ->
+        when (displayMode) {
+            MapDisplayMode.GOOGLE_WEB -> {
+                WebGoogleMap(
+                    apiKey = effectiveMapsKey,
+                    vehicles = uiState.liveVehicles,
+                    centerLat = webCenterLat,
+                    centerLon = webCenterLon,
+                    zoom = webZoom
+                )
+            }
+            MapDisplayMode.GOOGLE_SDK -> {
+                GoogleMap(
+                    modifier = Modifier.fillMaxSize(),
+                    cameraPositionState = cameraPositionState,
+                    uiSettings = MapUiSettings(zoomControlsEnabled = false)
+                ) {
+                    uiState.liveVehicles.forEach { vehicle ->
+                        val markerHue = when {
+                            vehicle.delaySeconds <= 30 -> BitmapDescriptorFactory.HUE_AZURE
+                            vehicle.delaySeconds <= 120 -> BitmapDescriptorFactory.HUE_YELLOW
+                            else -> BitmapDescriptorFactory.HUE_RED
+                        }
                         Marker(
-                            state = MarkerState(position = LatLng(pr.lat, pr.lon)),
-                            title = pr.name,
-                            snippet = "Volná místa: ${pr.freePlaces} / ${pr.totalPlaces}",
-                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE)
+                            state = MarkerState(position = LatLng(vehicle.lat, vehicle.lon)),
+                            title = "Linka ${vehicle.routeShortName} → ${vehicle.headsign}",
+                            snippet = buildString {
+                                append("Zpoždění: ${vehicle.delaySeconds} s • ${vehicle.speedKmh.toInt()} km/h")
+                                if (vehicle.isDeadReckoningEstimated) append(" [DEAD RECKONING]")
+                                if (vehicle.isFromRawInputGateway) append(" [RAW STREAM]")
+                            },
+                            icon = BitmapDescriptorFactory.defaultMarker(markerHue),
+                            rotation = vehicle.bearing
                         )
                     }
-                }
 
-                if (uiState.showBikesLayer) {
-                    uiState.mapSharedBikes.forEach { bike ->
-                        Marker(
-                            state = MarkerState(position = LatLng(bike.lat, bike.lon)),
-                            title = "${bike.provider}: ${bike.name}",
-                            snippet = "Volných kol: ${bike.freeBikes}",
-                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_MAGENTA)
-                        )
+                    if (uiState.showParkingsLayer) {
+                        uiState.parkingsPR.forEach { pr ->
+                            Marker(
+                                state = MarkerState(position = LatLng(pr.lat, pr.lon)),
+                                title = pr.name,
+                                snippet = "Volná místa: ${pr.freePlaces} / ${pr.totalPlaces}",
+                                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE)
+                            )
+                        }
+                    }
+
+                    if (uiState.showBikesLayer) {
+                        uiState.mapSharedBikes.forEach { bike ->
+                            Marker(
+                                state = MarkerState(position = LatLng(bike.lat, bike.lon)),
+                                title = "${bike.provider}: ${bike.name}",
+                                snippet = "Volných kol: ${bike.freeBikes}",
+                                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_MAGENTA)
+                            )
+                        }
                     }
                 }
             }
-        } else {
-            DynamicTelemetryRadar(
-                centerTarget = cameraPositionState.position.target,
-                vehicles = uiState.liveVehicles,
-                showParkings = uiState.showParkingsLayer,
-                parkings = uiState.parkingsPR,
-                showBikes = uiState.showBikesLayer,
-                bikes = uiState.mapSharedBikes
-            )
+            MapDisplayMode.RADAR -> {
+                DynamicTelemetryRadar(
+                    centerTarget = cameraPositionState.position.target,
+                    vehicles = uiState.liveVehicles,
+                    showParkings = uiState.showParkingsLayer,
+                    parkings = uiState.parkingsPR,
+                    showBikes = uiState.showBikesLayer,
+                    bikes = uiState.mapSharedBikes
+                )
+            }
         }
 
         // Horní ovládací a filtrační panel
@@ -136,6 +168,21 @@ fun LiveMapScreen(
                         onValueChange = viewModel::onMapLineFilterChanged,
                         label = { Text("Filtrovat linku (např. 412, 191)", color = Color.White.copy(alpha = 0.75f)) },
                         singleLine = true,
+                        trailingIcon = {
+                            if (uiState.mapLineFilter.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { viewModel.onMapLineFilterChanged("") },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Vymazat filtr",
+                                        tint = Color.White.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
@@ -144,12 +191,20 @@ fun LiveMapScreen(
                         ),
                         modifier = Modifier.weight(1f)
                     )
+                }
 
-                    FilterChip(
-                        selected = useTacticalRadarCanvas,
-                        onClick = { useTacticalRadarCanvas = !useTacticalRadarCanvas },
-                        label = { Text(if (useTacticalRadarCanvas) "Google Mapa" else "120Hz Radar") }
-                    )
+                // Výběr režimu mapy (Google Web s podporou Demo Key, Google SDK, 120Hz Radar)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    MapDisplayMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = displayMode == mode,
+                            onClick = { displayMode = mode },
+                            label = { Text(mode.label, fontSize = 11.sp, fontWeight = if (displayMode == mode) FontWeight.Bold else FontWeight.Normal) }
+                        )
+                    }
                 }
 
                 // Rychlé skoky: Praha vs. Mladá Boleslav vs. Vycentrovat všechna vozidla
@@ -159,6 +214,9 @@ fun LiveMapScreen(
                 ) {
                     SuggestionChip(
                         onClick = {
+                            webCenterLat = pragueCenter.latitude
+                            webCenterLon = pragueCenter.longitude
+                            webZoom = 12.5f
                             scope.launch {
                                 cameraPositionState.animate(
                                     CameraUpdateFactory.newLatLngZoom(pragueCenter, 12.5f)
@@ -170,6 +228,9 @@ fun LiveMapScreen(
 
                     SuggestionChip(
                         onClick = {
+                            webCenterLat = mbCenter.latitude
+                            webCenterLon = mbCenter.longitude
+                            webZoom = 13.5f
                             scope.launch {
                                 cameraPositionState.animate(
                                     CameraUpdateFactory.newLatLngZoom(mbCenter, 13.5f)
@@ -188,6 +249,9 @@ fun LiveMapScreen(
                                 val maxLat = lats.maxOrNull() ?: 50.5
                                 val minLon = lons.minOrNull() ?: 14.0
                                 val maxLon = lons.maxOrNull() ?: 15.0
+                                webCenterLat = (minLat + maxLat) / 2.0
+                                webCenterLon = (minLon + maxLon) / 2.0
+                                webZoom = 12f
                                 val bounds = LatLngBounds(
                                     LatLng(minLat, minLon),
                                     LatLng(maxLat, maxLon)
@@ -227,8 +291,8 @@ fun LiveMapScreen(
                 }
             }
 
-            // Upozornění, pokud není zadán Google Maps API klíč
-            if (!isMapsKeyConfigured && !useTacticalRadarCanvas) {
+            // Upozornění pouze při zvoleném Google SDK, pokud není v manifestu/local.properties klíč
+            if (!isMapsKeyConfigured && displayMode == MapDisplayMode.GOOGLE_SDK) {
                 Surface(
                     color = Color(0xDD0F172A),
                     shape = MaterialTheme.shapes.medium,
@@ -242,22 +306,22 @@ fun LiveMapScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Google Maps API klíč není nakonfigurován",
+                                text = "Nativní Google SDK vyžaduje Maps SDK pro Android",
                                 color = Color(0xFFFDE68A),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp
                             )
                             Text(
-                                text = "Pro zobrazení dlaždic vložte klíč do local.properties (MAPS_API_KEY) nebo přepněte na Radar.",
+                                text = "Pro webový Demo Key zvolte režim „Google Web“, nebo vložte klíč v Nastavení.",
                                 color = Color.White.copy(alpha = 0.75f),
                                 fontSize = 11.sp
                             )
                         }
                         TextButton(
-                            onClick = { useTacticalRadarCanvas = true },
+                            onClick = { displayMode = MapDisplayMode.GOOGLE_WEB },
                             colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF38BDF8))
                         ) {
-                            Text("Radar", fontWeight = FontWeight.Bold)
+                            Text("Google Web", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -418,4 +482,188 @@ private fun DynamicTelemetryRadar(
             }
         }
     }
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun WebGoogleMap(
+    apiKey: String,
+    vehicles: List<LiveVehicleMarker>,
+    centerLat: Double,
+    centerLon: Double,
+    zoom: Float,
+    modifier: Modifier = Modifier
+) {
+    var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var isReady by remember { mutableStateOf(false) }
+
+    val hasKey = apiKey.isNotBlank() && !apiKey.contains("YOUR_GOOGLE_MAPS_API_KEY")
+
+    val html = remember(apiKey) {
+        if (hasKey) {
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                <style>
+                    html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0f172a; }
+                </style>
+                <script src="https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap" async defer></script>
+                <script>
+                    var map;
+                    var markers = {};
+                    function initMap() {
+                        map = new google.maps.Map(document.getElementById('map'), {
+                            center: { lat: $centerLat, lng: $centerLon },
+                            zoom: ${zoom.toInt()},
+                            mapTypeControl: false,
+                            streetViewControl: false,
+                            fullscreenControl: false,
+                            styles: [
+                                { "elementType": "geometry", "stylers": [{ "color": "#1e293b" }] },
+                                { "elementType": "labels.text.stroke", "stylers": [{ "color": "#0f172a" }] },
+                                { "elementType": "labels.text.fill", "stylers": [{ "color": "#94a3b8" }] },
+                                { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#334155" }] },
+                                { "featureType": "road.highway", "elementType": "geometry", "stylers": [{ "color": "#475569" }] },
+                                { "featureType": "transit", "elementType": "geometry", "stylers": [{ "color": "#1e293b" }] },
+                                { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#0f172a" }] }
+                            ]
+                        });
+                    }
+                    function updateVehicles(list) {
+                        if (!map) return;
+                        var currentIds = {};
+                        for (var i = 0; i < list.length; i++) {
+                            var v = list[i];
+                            currentIds[v.id] = true;
+                            if (markers[v.id]) {
+                                markers[v.id].setPosition({ lat: v.lat, lng: v.lng });
+                            } else {
+                                markers[v.id] = new google.maps.Marker({
+                                    position: { lat: v.lat, lng: v.lng },
+                                    map: map,
+                                    title: "Linka " + v.line + " -> " + v.headsign,
+                                    label: {
+                                        text: v.line,
+                                        color: "#ffffff",
+                                        fontWeight: "bold",
+                                        fontSize: "11px"
+                                    }
+                                });
+                            }
+                        }
+                        for (var id in markers) {
+                            if (!currentIds[id]) {
+                                markers[id].setMap(null);
+                                delete markers[id];
+                            }
+                        }
+                    }
+                    function panToCoords(lat, lng, z) {
+                        if (map) {
+                            map.panTo({ lat: lat, lng: lng });
+                            if (z) map.setZoom(z);
+                        }
+                    }
+                </script>
+            </head>
+            <body>
+                <div id="map"></div>
+            </body>
+            </html>
+            """.trimIndent()
+        } else {
+            """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+                <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+                <style>
+                    html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0f172a; }
+                    .bus-badge {
+                        background: #2563eb;
+                        color: #ffffff;
+                        border: 2px solid white;
+                        border-radius: 8px;
+                        padding: 2px 5px;
+                        font-weight: bold;
+                        font-size: 11px;
+                        text-align: center;
+                    }
+                </style>
+            </head>
+            <body>
+                <div id="map"></div>
+                <script>
+                    var map = L.map('map', { zoomControl: false }).setView([$centerLat, $centerLon], ${zoom.toInt()});
+                    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+                    var markers = {};
+                    function updateVehicles(list) {
+                        var currentIds = {};
+                        for (var i = 0; i < list.length; i++) {
+                            var v = list[i];
+                            currentIds[v.id] = true;
+                            var icon = L.divIcon({
+                                className: 'bus-icon',
+                                html: '<div class="bus-badge">' + v.line + '</div>',
+                                iconSize: [36, 20]
+                            });
+                            if (markers[v.id]) {
+                                markers[v.id].setLatLng([v.lat, v.lng]);
+                            } else {
+                                markers[v.id] = L.marker([v.lat, v.lng], { icon: icon }).addTo(map)
+                                    .bindPopup('<b>Linka ' + v.line + '</b><br>' + v.headsign + '<br>Zpoždění: ' + v.delay + ' s');
+                            }
+                        }
+                        for (var id in markers) {
+                            if (!currentIds[id]) {
+                                map.removeLayer(markers[id]);
+                                delete markers[id];
+                            }
+                        }
+                    }
+                    function panToCoords(lat, lng, z) {
+                        map.setView([lat, lng], z || 13);
+                    }
+                </script>
+            </body>
+            </html>
+            """.trimIndent()
+        }
+    }
+
+    LaunchedEffect(centerLat, centerLon, zoom) {
+        webViewInstance?.evaluateJavascript("if (typeof panToCoords === 'function') panToCoords($centerLat, $centerLon, ${zoom.toInt()});", null)
+    }
+
+    AndroidView(
+        modifier = modifier.fillMaxSize(),
+        factory = { ctx ->
+            WebView(ctx).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.loadWithOverviewMode = true
+                settings.useWideViewPort = true
+                webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        isReady = true
+                    }
+                }
+                loadDataWithBaseURL("https://maps.googleapis.com", html, "text/html", "UTF-8", null)
+                webViewInstance = this
+            }
+        },
+        update = { webView ->
+            if (isReady) {
+                val vehiclesJson = vehicles.take(75).map { v ->
+                    """{"id":"${v.tripId.replace("\"", "")}","line":"${v.routeShortName}","headsign":"${v.headsign.replace("\"", "").replace("'", "")}","lat":${v.lat},"lng":${v.lon},"delay":${v.delaySeconds}}"""
+                }.joinToString(",", "[", "]")
+                webView.evaluateJavascript("if (typeof updateVehicles === 'function') updateVehicles($vehiclesJson);", null)
+            }
+        }
+    )
 }

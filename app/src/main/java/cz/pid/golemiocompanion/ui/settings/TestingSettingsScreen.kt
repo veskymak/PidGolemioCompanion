@@ -36,23 +36,46 @@ fun TestingSettingsScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item(key = "api_token_section") {
+            val isGolemioConfigured = labSettings.golemioApiKey.isNotBlank()
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .liquidGlass(cornerRadius = 22.dp)
+                    .liquidGlass(
+                        cornerRadius = 22.dp,
+                        tintColor = if (isGolemioConfigured) Color(0xFF10B981) else Color(0xFFF59E0B)
+                    )
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = "Golemio & PID OpenAPI Klíč (X-Access-Token)",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Golemio & PID OpenAPI Klíč",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Surface(
+                        color = if (isGolemioConfigured) Color(0xFF10B981).copy(alpha = 0.25f) else Color(0xFFF59E0B).copy(alpha = 0.25f),
+                        shape = MaterialTheme.shapes.extraSmall
+                    ) {
+                        Text(
+                            text = if (isGolemioConfigured) "AKTIVNÍ" else "DEMO DATA",
+                            color = if (isGolemioConfigured) Color(0xFF4ADE80) else Color(0xFFFBBF24),
+                            fontWeight = FontWeight.Black,
+                            fontSize = 10.sp,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = apiKeyDraft,
                     onValueChange = { apiKeyDraft = it },
-                    label = { Text("Vložte svůj Golemio API klíč", color = Color.White.copy(alpha = 0.7f)) },
+                    label = { Text("Vložte svůj Golemio API klíč (X-Access-Token)", color = Color.White.copy(alpha = 0.7f)) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
@@ -73,8 +96,12 @@ fun TestingSettingsScreen(
         }
 
         item(key = "google_maps_api_section") {
-            val isConfigured = cz.pid.golemiocompanion.BuildConfig.MAPS_API_KEY.isNotBlank() &&
-                !cz.pid.golemiocompanion.BuildConfig.MAPS_API_KEY.contains("YOUR_GOOGLE_MAPS_API_KEY")
+            val effectiveMapsKey = labSettings.googleMapsApiKey.ifBlank { cz.pid.golemiocompanion.BuildConfig.MAPS_API_KEY }.trim()
+            val isConfigured = effectiveMapsKey.isNotBlank() &&
+                !effectiveMapsKey.contains("YOUR_GOOGLE_MAPS_API_KEY")
+            var mapsKeyDraft by remember(effectiveMapsKey) {
+                mutableStateOf(effectiveMapsKey)
+            }
 
             Column(
                 modifier = Modifier
@@ -84,7 +111,7 @@ fun TestingSettingsScreen(
                         tintColor = if (isConfigured) Color(0xFF10B981) else Color(0xFFF59E0B)
                     )
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -111,8 +138,42 @@ fun TestingSettingsScreen(
                     }
                 }
 
+                if (isConfigured) {
+                    val preview = if (effectiveMapsKey.length > 12) {
+                        "${effectiveMapsKey.take(8)}...${effectiveMapsKey.takeLast(4)}"
+                    } else effectiveMapsKey
+                    Text(
+                        text = "Aktuálně načtený klíč: $preview",
+                        color = Color(0xFF34D399),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                OutlinedTextField(
+                    value = mapsKeyDraft,
+                    onValueChange = { mapsKeyDraft = it },
+                    label = { Text("Vložte svůj Google Maps API klíč", color = Color.White.copy(alpha = 0.7f)) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF38BDF8),
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Button(
+                    onClick = { viewModel.onGoogleMapsApiKeyUpdated(mapsKeyDraft) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("Uložit Maps klíč", color = Color.White)
+                }
+
                 Text(
-                    text = "Pro zobrazení mapových podkladů Google Maps vložte svůj klíč z Google Cloud Console do souboru local.properties v kořeni projektu:\nMAPS_API_KEY=AIzaSy...\n\nPokud klíč nemáte, na obrazovce Živá mapa jednoduše přepněte na tlačítko „120Hz Radar“, který vykresluje všechny autobusy v reálném čase plynule i bez Google API.",
+                    text = "Lze použít klíč z Google Cloud Console nebo bezplatný Demo Key z developers.google.com/maps/demo-key (bez kreditní karty). Na obrazovce Živá mapa pak zvolte režim „Google Web“, který tento Demo Key přímo podporuje.",
                     color = Color.White.copy(alpha = 0.8f),
                     fontSize = 12.sp,
                     lineHeight = 17.sp

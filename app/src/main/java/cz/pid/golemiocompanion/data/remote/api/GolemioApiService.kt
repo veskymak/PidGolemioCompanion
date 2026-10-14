@@ -10,8 +10,8 @@ interface GolemioApiService {
     @GET("v2/pid/departureboards")
     suspend fun getDepartureBoards(
         @Header("X-Access-Token") apiKey: String,
-        @Query("names[]") stopNames: List<String>? = null,
-        @Query("ids[]") stopIds: List<String>? = null,
+        @Query("names") stopNames: List<String>? = null,
+        @Query("ids") stopIds: List<String>? = null,
         @Query("minutesBefore") minutesBefore: Int = 5,
         @Query("minutesAfter") minutesAfter: Int = 60,
         @Query("includeMetroTrains") includeMetroTrains: Boolean = true,

@@ -120,7 +120,8 @@ data class LabSettingsState(
     val forced120HzAggressiveRender: Boolean = false,
     val emergencyTransfer600m: Boolean = true,
     val floatingPipMiniCountdown: Boolean = false,
-    val golemioApiKey: String = ""
+    val golemioApiKey: String = "",
+    val googleMapsApiKey: String = ""
 )
 
 @Stable

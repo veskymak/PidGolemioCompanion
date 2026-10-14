@@ -20,10 +20,18 @@ class LabPreferencesRepository(private val context: Context) {
         val EMERGENCY_TRANSFER_600M = booleanPreferencesKey("emergency_transfer_600m")
         val FLOATING_PIP = booleanPreferencesKey("floating_pip_mini_countdown")
         val GOLEMIO_API_KEY = stringPreferencesKey("golemio_api_key")
+        val GOOGLE_MAPS_API_KEY = stringPreferencesKey("google_maps_api_key")
         val FAVORITES_RAW = stringSetPreferencesKey("favorite_connections_set")
     }
 
     val labSettingsFlow: Flow<LabSettingsState> = context.dataStore.data.map { prefs ->
+        val storedMapsKey = prefs[Keys.GOOGLE_MAPS_API_KEY]
+        val effectiveMapsKey = if (!storedMapsKey.isNullOrBlank()) {
+            storedMapsKey
+        } else {
+            cz.pid.golemiocompanion.BuildConfig.MAPS_API_KEY
+        }
+
         LabSettingsState(
             deadReckoningInTunnels = prefs[Keys.DEAD_RECKONING] ?: false,
             rawInputGatewayStream = prefs[Keys.RAW_INPUT_GATEWAY] ?: false,
@@ -31,7 +39,8 @@ class LabPreferencesRepository(private val context: Context) {
             forced120HzAggressiveRender = prefs[Keys.FORCED_120HZ] ?: false,
             emergencyTransfer600m = prefs[Keys.EMERGENCY_TRANSFER_600M] ?: true,
             floatingPipMiniCountdown = prefs[Keys.FLOATING_PIP] ?: false,
-            golemioApiKey = prefs[Keys.GOLEMIO_API_KEY] ?: ""
+            golemioApiKey = prefs[Keys.GOLEMIO_API_KEY] ?: "",
+            googleMapsApiKey = effectiveMapsKey
         )
     }
 
@@ -71,6 +80,12 @@ class LabPreferencesRepository(private val context: Context) {
     suspend fun updateApiKey(apiKey: String) {
         context.dataStore.edit { prefs ->
             prefs[Keys.GOLEMIO_API_KEY] = apiKey.trim()
+        }
+    }
+
+    suspend fun updateGoogleMapsApiKey(apiKey: String) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.GOOGLE_MAPS_API_KEY] = apiKey.trim()
         }
     }
 
