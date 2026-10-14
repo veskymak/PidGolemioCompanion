@@ -1,0 +1,44 @@
+name: Build PID Golemio Android APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-debug-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout zdrojového kódu
+        uses: actions/checkout@v4
+
+      - name: 2. Instalace JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 3. Příprava Gradle a ověření Gradle Wrapperu
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: 4. Vygenerování gradlew skriptu (pokud v repozitáři ještě není) a nastavení práv
+        run: |
+          if [ ! -f "./gradlew" ]; then
+            gradle wrapper --gradle-version 8.9
+          fi
+          chmod +x gradlew
+
+      - name: 5. Kompilace instalačního Debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: 6. Export a nahrání hotového .apk jako GitHub Actions Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PID-Golemio-Glass-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14
