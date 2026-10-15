@@ -15,7 +15,8 @@ data class LabSettings(
     val showExactSecondsInBoard: Boolean = false,
     val autoSelectNearestStopOnStart: Boolean = true,
     val showExtendedMapBadges: Boolean = false,
-    val nearbyRadiusKm: Int = 10
+    val nearbyRadiusKm: Int = 10,
+    val enableIslandNotification: Boolean = true
 )
 
 class LabPreferencesRepository(context: Context) {
@@ -39,7 +40,8 @@ class LabPreferencesRepository(context: Context) {
             showExactSecondsInBoard = prefs.getBoolean(KEY_EXACT_SECONDS_BOARD, false),
             autoSelectNearestStopOnStart = prefs.getBoolean(KEY_AUTO_NEAREST_STOP, true),
             showExtendedMapBadges = prefs.getBoolean(KEY_EXTENDED_MAP_BADGES, false),
-            nearbyRadiusKm = prefs.getInt(KEY_NEARBY_RADIUS_KM, 10)
+            nearbyRadiusKm = prefs.getInt(KEY_NEARBY_RADIUS_KM, 10),
+            enableIslandNotification = prefs.getBoolean(KEY_ISLAND_NOTIFICATION, true)
         )
     }
 
@@ -83,6 +85,11 @@ class LabPreferencesRepository(context: Context) {
         _settings.value = loadSettings()
     }
 
+    fun setEnableIslandNotification(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_ISLAND_NOTIFICATION, enabled).apply()
+        _settings.value = loadSettings()
+    }
+
     companion object {
         const val DEFAULT_CARTO_KEY = "cb1_4ll2_1_f0afdd71b59d8a4f0f10563a"
         private const val KEY_GOLEMIO_API_KEY = "golemio_api_key"
@@ -93,5 +100,6 @@ class LabPreferencesRepository(context: Context) {
         private const val KEY_AUTO_NEAREST_STOP = "auto_nearest_stop_on_start"
         private const val KEY_EXTENDED_MAP_BADGES = "show_extended_map_badges"
         private const val KEY_NEARBY_RADIUS_KM = "nearby_radius_km"
+        private const val KEY_ISLAND_NOTIFICATION = "enable_island_notification"
     }
 }

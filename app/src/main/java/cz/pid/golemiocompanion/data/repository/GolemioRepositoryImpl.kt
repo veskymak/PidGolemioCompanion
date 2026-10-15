@@ -48,40 +48,61 @@ class GolemioRepositoryImpl(
 
     override suspend fun getDeparturesForStop(stop: PidStop): Result<List<DepartureInfo>> {
         return runCatching {
-            val queryNames = stop.getAllQueryNames()
-            val response = api.getDepartureBoard(
-                apiKey = apiKey,
-                stopNames = queryNames,
-                minutesBefore = 0,
-                minutesAfter = 180,
-                limit = 40
-            )
+            val candidateNames = (listOf(stop.golemioPrimaryName, stop.displayName) + stop.getAllQueryNames()).distinct()
+            var rawDepartures = emptyList<cz.pid.golemiocompanion.data.remote.dto.DepartureItemDto>()
+
+            for (name in candidateNames) {
+                val res = runCatching {
+                    api.getDepartureBoard(
+                        apiKey = apiKey,
+                        stopName = name,
+                        minutesBefore = 0,
+                        minutesAfter = 240,
+                        limit = 50
+                    )
+                }.getOrNull()
+
+                if (!res?.departures.isNullOrEmpty()) {
+                    rawDepartures = res?.departures.orEmpty()
+                    break
+                }
+            }
 
             val nowMillis = System.currentTimeMillis()
 
-            response.departures.orEmpty().mapNotNull { dto ->
+            rawDepartures.mapNotNull { dto ->
                 val scheduledIso = dto.departureTimestamp?.scheduled ?: return@mapNotNull null
                 val scheduledOdt = runCatching { OffsetDateTime.parse(scheduledIso) }.getOrNull()
                     ?: return@mapNotNull null
 
                 val scheduledEpochMillis = scheduledOdt.toInstant().toEpochMilli()
 
-                // PŘESNÝ VÝPOČET DLE ZADÁNÍ:
-                // Pouze Jízdní řád (scheduled) + nahlášené zpoždění z Golemia v sekundách.
-                // Nepřičítá se zaokrouhlené pole 'predicted' ani stáří pingu vozidla.
-                val delayAvailable = dto.delay?.isAvailable == true
-                val delaySeconds = if (delayAvailable) (dto.delay?.seconds ?: 0) else 0
+                // 1. Přednostně použít přesný predikovaný čas odjezdu z Golemia, pokud existuje:
+                val predictedIso = dto.departureTimestamp?.predicted
+                val predictedOdt = predictedIso?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+                val predictedEpochMillis = predictedOdt?.toInstant()?.toEpochMilli()
 
-                val exactDepartureEpochMillis = scheduledEpochMillis + (delaySeconds * 1000L)
+                val delayAvailable = dto.delay?.isAvailable == true
+                val delaySeconds = when {
+                    delayAvailable && dto.delay?.seconds != null -> dto.delay.seconds
+                    predictedEpochMillis != null -> ((predictedEpochMillis - scheduledEpochMillis) / 1000L).toInt().coerceAtLeast(0)
+                    dto.delay?.minutes != null -> dto.delay.minutes * 60
+                    else -> 0
+                }
+
+                // Pokud Golemio aktualizuje zpoždění (např. z 8 na 6 min), čas odjezdu se ihned přepočítá:
+                val exactDepartureEpochMillis = predictedEpochMillis ?: (scheduledEpochMillis + (delaySeconds * 1000L))
 
                 // Zamezení zobrazení starých odjezdů:
-                // Spoje, které již odjely (s tolerancí max 5 sekund pro spoj na zastávce), se okamžitě zahodí.
                 if (exactDepartureEpochMillis < nowMillis - 5_000L) {
                     return@mapNotNull null
                 }
 
                 val scheduledLocal = scheduledOdt.atZoneSameInstant(pragueZone)
-                val exactLocal = scheduledOdt.plusSeconds(delaySeconds.toLong()).atZoneSameInstant(pragueZone)
+                val exactLocal = OffsetDateTime.ofInstant(
+                    java.time.Instant.ofEpochMilli(exactDepartureEpochMillis),
+                    pragueZone
+                )
 
                 val routeShortName = dto.route?.shortName ?: "?"
                 val headsign = dto.trip?.headsign ?: "Neznámý směr"
@@ -97,7 +118,7 @@ class GolemioRepositoryImpl(
                     scheduledEpochMillis = scheduledEpochMillis,
                     exactDepartureEpochMillis = exactDepartureEpochMillis,
                     delaySeconds = delaySeconds,
-                    isDelayAvailable = delayAvailable,
+                    isDelayAvailable = delayAvailable || (predictedEpochMillis != null && predictedEpochMillis != scheduledEpochMillis),
                     vehicleType = mapRouteType(dto.route?.type, routeShortName),
                     tripId = dto.trip?.id,
                     isWheelchairAccessible = dto.trip?.isWheelchairAccessible == true,
@@ -114,8 +135,9 @@ class GolemioRepositoryImpl(
             val cleanFilter = routeFilter?.trim()?.takeIf { it.isNotEmpty() }
             val response = api.getVehiclePositions(
                 apiKey = apiKey,
-                limit = 1200,
-                routeShortName = cleanFilter
+                limit = 5000,
+                routeShortName = cleanFilter,
+                includeNotTracking = true
             )
 
             response.features.orEmpty().mapNotNull { feature ->
@@ -129,7 +151,7 @@ class GolemioRepositoryImpl(
                 val lastPos = feature.properties?.lastPosition
                 val routeName = gtfs?.routeShortName ?: return@mapNotNull null
 
-                if (cleanFilter != null && !routeName.equals(cleanFilter, ignoreCase = true)) {
+                if (cleanFilter != null && !routeName.contains(cleanFilter, ignoreCase = true)) {
                     return@mapNotNull null
                 }
 
@@ -147,7 +169,7 @@ class GolemioRepositoryImpl(
                     speedKmh = (lastPos?.speed ?: 0f).toInt(),
                     vehicleType = mapRouteType(vehicleTypeId, routeName),
                     originTimestamp = lastPos?.originTimestamp,
-                    isInactive = lastPos?.statePosition == "inactive"
+                    isInactive = lastPos?.statePosition == "inactive" || lastPos?.originTimestamp == null
                 )
             }
         }

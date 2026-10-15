@@ -286,6 +286,13 @@ fun TestingSettingsScreen(
 
         // Přepínače funkcí
         LabSwitchCard(
+            title = "🏝️ HyperOS Ostrůvek (Dynamic Island)",
+            description = "Při minimalizaci aplikace během sledování spoje automaticky přesune živý odpočet do ostrůvku u průstřelu kamery (přes notifikační Stopky HyperOS).",
+            checked = settings.enableIslandNotification,
+            onCheckedChange = { repository.setEnableIslandNotification(it) }
+        )
+
+        LabSwitchCard(
             title = "PiP (Obraz v obraze) plovoucí odpočet",
             description = "Při minimalizaci aplikace během aktivního sledování spoje přepne odpočet do plovoucího okna.",
             checked = settings.enablePipCountdown,

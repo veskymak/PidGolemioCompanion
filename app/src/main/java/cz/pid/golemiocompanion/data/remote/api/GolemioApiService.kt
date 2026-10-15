@@ -12,14 +12,16 @@ interface GolemioApiService {
 
     /**
      * minutesBefore = 0 zamezí Golemiu posílat staré odjezdy za posledních 30 minut.
+     * stopName: přesný název zastávky (př. "Loukov u Mn.Hradiště", "Žďár, Doubrava").
      */
     @GET("v2/pid/departureboards")
     suspend fun getDepartureBoard(
         @Header("X-Access-Token") apiKey: String,
-        @Query("names") stopNames: List<String>,
+        @Header("Cache-Control") cacheControl: String = "no-cache",
+        @Query("names") stopName: String,
         @Query("minutesBefore") minutesBefore: Int = 0,
-        @Query("minutesAfter") minutesAfter: Int = 180,
-        @Query("limit") limit: Int = 35,
+        @Query("minutesAfter") minutesAfter: Int = 240,
+        @Query("limit") limit: Int = 50,
         @Query("preferredTimezone") preferredTimezone: String = "Europe/Prague",
         @Query("mode") mode: String = "departures",
         @Query("order") order: String = "real"
@@ -28,8 +30,10 @@ interface GolemioApiService {
     @GET("v2/vehiclepositions")
     suspend fun getVehiclePositions(
         @Header("X-Access-Token") apiKey: String,
-        @Query("limit") limit: Int = 1200,
-        @Query("routeShortName") routeShortName: String? = null
+        @Header("Cache-Control") cacheControl: String = "no-cache",
+        @Query("limit") limit: Int = 5000,
+        @Query("routeShortName") routeShortName: String? = null,
+        @Query("includeNotTracking") includeNotTracking: Boolean = true
     ): VehiclePositionsGeoJsonDto
 
     @GET("v1/parkings")

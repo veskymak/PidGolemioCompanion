@@ -2,6 +2,7 @@ package cz.pid.golemiocompanion
 
 import android.Manifest
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
@@ -11,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import cz.pid.golemiocompanion.service.DepartureTrackerService
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -232,14 +234,40 @@ class MainActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        val hasTracked = tripViewModel.uiState.value.trackedDeparture != null
-        val pipEnabled = labPreferencesRepository.settings.value.enablePipCountdown
-        if (hasTracked && pipEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val tracked = tripViewModel.uiState.value.trackedDeparture
+        val settings = labPreferencesRepository.settings.value
+
+        // 1. HyperOS Dynamic Island / Živá aktivita u kamery:
+        if (tracked != null && settings.enableIslandNotification) {
+            val intent = Intent(this, DepartureTrackerService::class.java).apply {
+                action = DepartureTrackerService.ACTION_START
+                putExtra("LINE", tracked.routeShortName)
+                putExtra("DESTINATION", tracked.headsign)
+                putExtra("TARGET_TIME", tracked.exactDepartureEpochMillis)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(this, intent)
+            } else {
+                startService(intent)
+            }
+        }
+
+        // 2. PiP režim (pokud je zapnutý a uživatel minimalizuje aplikaci):
+        if (tracked != null && settings.enablePipCountdown && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val params = PictureInPictureParams.Builder()
                 .setAspectRatio(Rational(16, 9))
                 .build()
             runCatching { enterPictureInPictureMode(params) }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Vrátil se zpět do aplikace – zastavíme foreground service ostrůvku:
+        val intent = Intent(this, DepartureTrackerService::class.java).apply {
+            action = DepartureTrackerService.ACTION_STOP
+        }
+        startService(intent)
     }
 
     override fun onPictureInPictureModeChanged(

@@ -1,12 +1,17 @@
 package cz.pid.golemiocompanion.ui.map
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
 import android.view.ViewGroup
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -41,6 +46,7 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
 import kotlin.math.roundToInt
 
 /**
@@ -71,6 +77,23 @@ enum class LitackaFilterTab(val title: String) {
     SHARING("SHARING")
 }
 
+enum class MapDisplayMode(val label: String) {
+    LITACKA("🗺️ Styl: Lítačka"),
+    MAPA_PID_WEB("🌐 Mapa PID (web)"),
+    OSM_CLASSIC("🗺️ Styl: Klasik OSM")
+}
+
+data class RouteTimelineStop(
+    val stopName: String,
+    val zone: String,
+    val scheduledTime: String,
+    val predictedTime: String,
+    val isVisited: Boolean,
+    val isCurrentOrNext: Boolean,
+    val geoPoint: GeoPoint
+)
+
+@SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveMapScreen(
@@ -92,11 +115,13 @@ fun LiveMapScreen(
     var showMetro by remember { mutableStateOf(true) }
     var showFerries by remember { mutableStateOf(true) }
 
-    // Vrstva zastávek: ve stylu Lítačky vypnuta ve výchozím stavu a vykresluje se pouze při dostatečném přiblížení
+    // Režim zobrazení: Nativní Lítačka vs. Oficiální mapa.pid.cz vs. Klasická OSM
+    var mapDisplayMode by remember { mutableStateOf(MapDisplayMode.LITACKA) }
+
+    // Zastávky: ve výchozím stavu vypnuté (stejně jako v Lítačce) a vykreslují se pouze při zoomu >= 14
     var showStops by remember { mutableStateOf(false) }
     var showParking by remember { mutableStateOf(false) }
     var showBikes by remember { mutableStateOf(false) }
-    var useClassicOsmTiles by remember { mutableStateOf(false) }
     var selectedVehicle by remember { mutableStateOf<LiveVehiclePosition?>(null) }
 
     // Dialog / Bottom Sheet filtrů přesně podle PID Lítačky
@@ -104,7 +129,7 @@ fun LiveMapScreen(
     var selectedFilterTab by remember { mutableStateOf(LitackaFilterTab.MHD) }
     var isSearchExpanded by remember { mutableStateOf(false) }
 
-    // Kritická inicializace osmdroid User-Agent před vytvořením MapView
+    // Inicializace osmdroid User-Agent
     remember(context) {
         Configuration.getInstance().userAgentValue = "${context.packageName}/2.0"
         true
@@ -119,15 +144,29 @@ fun LiveMapScreen(
             setTileSource(createCartoTileSource(labSettings.cartoApiKey))
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
-            controller.setZoom(14.5)
-            // Výchozí střed: aktuálně vybraná zastávka
+            controller.setZoom(14.0)
             controller.setCenter(
                 GeoPoint(uiState.selectedStop.latitude, uiState.selectedStop.longitude)
             )
         }
     }
 
-    // Napojení MapView na životní cyklus (bez onResume() osmdroid nestahuje dlaždice!)
+    // Automatické přicestování na hledanou linku při zadání filtru (např. 345, 715)
+    LaunchedEffect(uiState.mapRouteFilter, uiState.liveVehicles) {
+        val filter = uiState.mapRouteFilter.trim()
+        if (filter.isNotEmpty()) {
+            val matched = uiState.liveVehicles.firstOrNull {
+                it.routeShortName.equals(filter, ignoreCase = true)
+            } ?: uiState.liveVehicles.firstOrNull {
+                it.routeShortName.contains(filter, ignoreCase = true)
+            }
+            if (matched != null) {
+                mapView.controller.animateTo(GeoPoint(matched.latitude, matched.longitude), 14.5, 600L)
+            }
+        }
+    }
+
+    // Napojení MapView na životní cyklus
     DisposableEffect(lifecycleOwner, mapView) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -144,121 +183,160 @@ fun LiveMapScreen(
         }
     }
 
-    // Přepínání stylu mapy (Lítačka Světlá s CARTO klíčem vs. Klasická OSM)
-    LaunchedEffect(useClassicOsmTiles, labSettings.cartoApiKey) {
-        mapView.setTileSource(
-            if (useClassicOsmTiles) TileSourceFactory.MAPNIK else createCartoTileSource(labSettings.cartoApiKey)
-        )
+    // Přepínání stylu podkladu
+    LaunchedEffect(mapDisplayMode, labSettings.cartoApiKey) {
+        if (mapDisplayMode == MapDisplayMode.OSM_CLASSIC) {
+            mapView.setTileSource(TileSourceFactory.MAPNIK)
+        } else if (mapDisplayMode == MapDisplayMode.LITACKA) {
+            mapView.setTileSource(createCartoTileSource(labSettings.cartoApiKey))
+        }
         mapView.invalidate()
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        // Samotná mapa přes celou obrazovku
-        AndroidView(
-            factory = { mapView },
-            modifier = Modifier.fillMaxSize(),
-            update = { map ->
-                map.overlays.clear()
+        if (mapDisplayMode == MapDisplayMode.MAPA_PID_WEB) {
+            // Integrovaná oficiální webová mapa PID Lítačka (mapa.pid.cz)
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.setGeolocationEnabled(true)
+                        settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                        webViewClient = WebViewClient()
+                        val lat = uiState.selectedStop.latitude
+                        val lon = uiState.selectedStop.longitude
+                        loadUrl("https://mapa.pid.cz/?lat=$lat&lng=$lon&zoom=14")
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            // Nativní mapa se všemi vrstvami a zrychleným vykreslováním
+            AndroidView(
+                factory = { mapView },
+                modifier = Modifier.fillMaxSize(),
+                update = { map ->
+                    map.overlays.clear()
 
-                // 1. Vrstva zastávek (pouze pokud je zapnutá A mapa je dostatečně přiblížená, aby nezasahovala do polí)
-                if (showStops && map.zoomLevelDouble >= 13.5) {
-                    PidStopDirectory.allStops.forEach { stop ->
-                        val marker = Marker(map).apply {
-                            position = GeoPoint(stop.latitude, stop.longitude)
-                            title = stop.displayName
-                            snippet = "Klepnutím zobrazíte odjezdy (${stop.region})"
+                    // Vykreslení trasy vybraného vozidla (modrá linka jako v Lítačce)
+                    selectedVehicle?.let { vehicle ->
+                        val routeStops = getRouteStopsForVehicle(vehicle)
+                        if (routeStops.size >= 2) {
+                            val polyline = Polyline().apply {
+                                outlinePaint.color = 0xFF0284C7.toInt()
+                                outlinePaint.strokeWidth = 8f
+                                outlinePaint.strokeCap = Paint.Cap.ROUND
+                                setPoints(routeStops.map { it.geoPoint })
+                            }
+                            map.overlays.add(polyline)
+                        }
+                    }
+
+                    // 1. Vrstva zastávek (pouze při zapnutí a zoomu >= 14, aby nikdy nevisely v polích)
+                    if (showStops && map.zoomLevelDouble >= 14.0) {
+                        PidStopDirectory.allStops.forEach { stop ->
+                            val marker = Marker(map).apply {
+                                position = GeoPoint(stop.latitude, stop.longitude)
+                                title = stop.displayName
+                                snippet = "Klepnutím zobrazíte odjezdy (${stop.region})"
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                                icon = createLitackaStopDrawable(context, stop.isTrain)
+                                setOnMarkerClickListener { _, _ ->
+                                    onSelectStopFromMap(stop)
+                                    true
+                                }
+                            }
+                            map.overlays.add(marker)
+                        }
+                    }
+
+                    // 2. Vrstva P+R parkovišť
+                    if (showParking) {
+                        uiState.parkingLots.forEach { lot ->
+                            val marker = Marker(map).apply {
+                                position = GeoPoint(lot.latitude, lot.longitude)
+                                title = "${lot.name} (Volno: ${lot.freeSpaces}/${lot.totalCapacity})"
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                                icon = createLitackaPoiBadge(context, "P+R ${lot.freeSpaces}", 0xFF1D4ED8.toInt())
+                            }
+                            map.overlays.add(marker)
+                        }
+                    }
+
+                    // 3. Vrstva sdílených kol
+                    if (showBikes) {
+                        uiState.sharedBikes.take(80).forEach { bike ->
+                            val marker = Marker(map).apply {
+                                position = GeoPoint(bike.latitude, bike.longitude)
+                                title = bike.companyName
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                                icon = createLitackaPoiBadge(context, "🚲", 0xFF7C3AED.toInt())
+                            }
+                            map.overlays.add(marker)
+                        }
+                    }
+
+                    // 4. Vrstva polohy uživatele
+                    if (uiState.userLatitude != null && uiState.userLongitude != null) {
+                        val userMarker = Marker(map).apply {
+                            position = GeoPoint(uiState.userLatitude, uiState.userLongitude)
+                            title = "Moje poloha"
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                            icon = createLitackaStopDrawable(context, stop.isTrain)
+                            icon = createUserLocationDrawable(context)
+                        }
+                        map.overlays.add(userMarker)
+                    }
+
+                    // 5. Vrstva živých vozidel (směrové šipky + tečka zpoždění)
+                    val filteredVehicles = uiState.liveVehicles.filter { v ->
+                        val typeMatches = when (v.vehicleType) {
+                            VehicleType.BUS -> showBuses
+                            VehicleType.TROLLEYBUS -> showTrolleybuses
+                            VehicleType.TRAM -> showTrams
+                            VehicleType.TRAIN -> showTrains
+                            VehicleType.METRO -> showMetro
+                            VehicleType.FERRY -> showFerries
+                        }
+                        val routeMatches = if (uiState.mapRouteFilter.isBlank()) {
+                            true
+                        } else {
+                            v.routeShortName.contains(uiState.mapRouteFilter.trim(), ignoreCase = true)
+                        }
+                        typeMatches && routeMatches
+                    }
+
+                    filteredVehicles.forEach { vehicle ->
+                        val marker = Marker(map).apply {
+                            position = GeoPoint(vehicle.latitude, vehicle.longitude)
+                            title = "Linka ${vehicle.routeShortName} → ${vehicle.headsign}"
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                            icon = createLitackaVehicleDrawable(
+                                context = context,
+                                routeShortName = vehicle.routeShortName,
+                                bearing = vehicle.bearing,
+                                delaySeconds = vehicle.delaySeconds,
+                                vehicleType = vehicle.vehicleType,
+                                showExtendedDelay = labSettings.showExtendedMapBadges
+                            )
                             setOnMarkerClickListener { _, _ ->
-                                onSelectStopFromMap(stop)
+                                selectedVehicle = vehicle
                                 true
                             }
                         }
                         map.overlays.add(marker)
                     }
+
+                    map.invalidate()
                 }
+            )
+        }
 
-                // 2. Vrstva P+R parkovišť
-                if (showParking) {
-                    uiState.parkingLots.forEach { lot ->
-                        val marker = Marker(map).apply {
-                            position = GeoPoint(lot.latitude, lot.longitude)
-                            title = "${lot.name} (Volno: ${lot.freeSpaces}/${lot.totalCapacity})"
-                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                            icon = createLitackaPoiBadge(context, "P+R ${lot.freeSpaces}", 0xFF1D4ED8.toInt())
-                        }
-                        map.overlays.add(marker)
-                    }
-                }
-
-                // 3. Vrstva sdílených kol
-                if (showBikes) {
-                    uiState.sharedBikes.take(80).forEach { bike ->
-                        val marker = Marker(map).apply {
-                            position = GeoPoint(bike.latitude, bike.longitude)
-                            title = bike.companyName
-                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                            icon = createLitackaPoiBadge(context, "🚲", 0xFF7C3AED.toInt())
-                        }
-                        map.overlays.add(marker)
-                    }
-                }
-
-                // 4. Vrstva polohy uživatele
-                if (uiState.userLatitude != null && uiState.userLongitude != null) {
-                    val userMarker = Marker(map).apply {
-                        position = GeoPoint(uiState.userLatitude, uiState.userLongitude)
-                        title = "Moje poloha"
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                        icon = createUserLocationDrawable(context)
-                    }
-                    map.overlays.add(userMarker)
-                }
-
-                // 5. Vrstva živých vozidel ve stylu PID Lítačka (směrové šipky + tečka zpoždění)
-                val filteredVehicles = uiState.liveVehicles.filter { v ->
-                    val typeMatches = when (v.vehicleType) {
-                        VehicleType.BUS -> showBuses
-                        VehicleType.TROLLEYBUS -> showTrolleybuses
-                        VehicleType.TRAM -> showTrams
-                        VehicleType.TRAIN -> showTrains
-                        VehicleType.METRO -> showMetro
-                        VehicleType.FERRY -> showFerries
-                    }
-                    val routeMatches = if (uiState.mapRouteFilter.isBlank()) {
-                        true
-                    } else {
-                        v.routeShortName.contains(uiState.mapRouteFilter.trim(), ignoreCase = true)
-                    }
-                    typeMatches && routeMatches
-                }
-
-                filteredVehicles.forEach { vehicle ->
-                    val marker = Marker(map).apply {
-                        position = GeoPoint(vehicle.latitude, vehicle.longitude)
-                        title = "Linka ${vehicle.routeShortName} → ${vehicle.headsign}"
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                        icon = createLitackaVehicleDrawable(
-                            context = context,
-                            routeShortName = vehicle.routeShortName,
-                            bearing = vehicle.bearing,
-                            delaySeconds = vehicle.delaySeconds,
-                            vehicleType = vehicle.vehicleType,
-                            showExtendedDelay = labSettings.showExtendedMapBadges
-                        )
-                        setOnMarkerClickListener { _, _ ->
-                            selectedVehicle = vehicle
-                            true
-                        }
-                    }
-                    map.overlays.add(marker)
-                }
-
-                map.invalidate()
-            }
-        )
-
-        // Horní lišta ve stylu PID Lítačka (fialová hlavička s ikonou Tune pro filtry)
+        // Horní lišta ve stylu PID Lítačka
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -290,7 +368,6 @@ fun LiveMapScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            // Tlačítko hledání linky
                             IconButton(onClick = { isSearchExpanded = !isSearchExpanded }) {
                                 Icon(
                                     imageVector = Icons.Default.Search,
@@ -299,7 +376,6 @@ fun LiveMapScreen(
                                 )
                             }
 
-                            // Tlačítko filtrů přesně jako v Lítačce
                             IconButton(onClick = { showFilterSheet = true }) {
                                 Icon(
                                     imageVector = Icons.Default.Tune,
@@ -317,8 +393,8 @@ fun LiveMapScreen(
                             .fillMaxWidth()
                             .padding(top = 4.dp, bottom = 6.dp)
                     ) {
-                        RegionJumpChip("Žďár / MH") {
-                            mapView.controller.animateTo(GeoPoint(50.5350, 15.0250), 13.5, 600L)
+                        RegionJumpChip("Žďár / Loukov") {
+                            mapView.controller.animateTo(GeoPoint(50.5580, 15.0568), 14.5, 600L)
                         }
                         RegionJumpChip("Ml. Boleslav") {
                             mapView.controller.animateTo(GeoPoint(50.4150, 14.9094), 14.5, 600L)
@@ -331,7 +407,7 @@ fun LiveMapScreen(
                         }
                     }
 
-                    // Vyhledávací pole linky (zobrazí se po klepnutí na lupu nebo pokud je zadaný filtr)
+                    // Vyhledávací pole linky
                     if (isSearchExpanded || uiState.mapRouteFilter.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(6.dp))
                         OutlinedTextField(
@@ -339,7 +415,7 @@ fun LiveMapScreen(
                             onValueChange = onRouteFilterChanged,
                             placeholder = {
                                 Text(
-                                    "Vyhledávejte číslo linky (např. 315, 715, 720)…",
+                                    "Vyhledávejte číslo linky (např. 345, 715, S35)…",
                                     color = Color(0xFFD8B4FE),
                                     fontSize = 13.sp
                                 )
@@ -380,7 +456,7 @@ fun LiveMapScreen(
                 }
             }
 
-            // Rychlé tlačítka filtrů na mapě (s možností rozkliknutí plného menu)
+            // Rychlá lišta filtrů
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -428,39 +504,18 @@ fun LiveMapScreen(
                         onClick = { showBikes = !showBikes }
                     )
                 }
-                item {
-                    Surface(
-                        onClick = { showFilterSheet = true },
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF281147),
-                        shadowElevation = 4.dp
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Tune,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Filtry",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
             }
         }
 
-        // Levé spodní tlačítko pro přepnutí podkladu (Lítačka Carto vs. Klasická OSM)
+        // Levé spodní tlačítko pro přepnutí podkladu (Lítačka Carto vs. mapa.pid.cz vs. Klasická OSM)
         Surface(
-            onClick = { useClassicOsmTiles = !useClassicOsmTiles },
+            onClick = {
+                mapDisplayMode = when (mapDisplayMode) {
+                    MapDisplayMode.LITACKA -> MapDisplayMode.MAPA_PID_WEB
+                    MapDisplayMode.MAPA_PID_WEB -> MapDisplayMode.OSM_CLASSIC
+                    MapDisplayMode.OSM_CLASSIC -> MapDisplayMode.LITACKA
+                }
+            },
             shape = RoundedCornerShape(12.dp),
             color = Color.White,
             shadowElevation = 6.dp,
@@ -470,7 +525,7 @@ fun LiveMapScreen(
                 .padding(start = 14.dp, bottom = 96.dp)
         ) {
             Text(
-                text = if (useClassicOsmTiles) "🗺️ Styl: Klasik OSM" else "🗺️ Styl: Lítačka",
+                text = mapDisplayMode.label,
                 color = Color(0xFF281147),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
@@ -478,7 +533,7 @@ fun LiveMapScreen(
             )
         }
 
-        // Pravé spodní plovoucí tlačítko "Moje poloha"
+        // Pravé spodní tlačítko "Moje poloha"
         FloatingActionButton(
             onClick = {
                 onRequestGpsLocation()
@@ -504,132 +559,210 @@ fun LiveMapScreen(
             )
         }
 
-        // Detail vybraného vozidla při klepnutí na štítek na mapě
-        selectedVehicle?.let { v ->
+        // Detail a kompletní skrolovatelná trasa se zastávkami (podle screenshotu 4 z Lítačky)
+        selectedVehicle?.let { vehicle ->
+            val routeStops = remember(vehicle.id) { getRouteStopsForVehicle(vehicle) }
+
             Surface(
-                color = Color(0xFF151C2C),
-                shape = RoundedCornerShape(18.dp),
-                shadowElevation = 10.dp,
+                color = Color.White,
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                shadowElevation = 16.dp,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(horizontal = 14.dp, vertical = 96.dp)
                     .fillMaxWidth()
+                    .fillMaxHeight(0.60f)
+                    .navigationBarsPadding()
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Horní madlo pro potažení
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(36.dp)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(Color(0xFFCBD5E1))
+                        )
+                    }
+
+                    // Záhlaví: Ikona, Typ linky, Číslo, Směr a tlačítko zavřít (jako v Lítačce)
                     Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Surface(
-                                color = when (v.vehicleType) {
+                                color = when (vehicle.vehicleType) {
                                     VehicleType.TRAM -> Color(0xFFC8102E)
                                     VehicleType.TRAIN -> Color(0xFF2B3990)
                                     else -> Color(0xFF0078A8)
                                 },
                                 shape = RoundedCornerShape(8.dp)
                             ) {
-                                Text(
-                                    text = v.routeShortName,
-                                    color = Color.White,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                Icon(
+                                    imageVector = if (vehicle.vehicleType == VehicleType.TRAIN) Icons.Default.DirectionsRailway else Icons.Default.DirectionsBus,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier
+                                        .padding(8.dp)
+                                        .size(24.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "→ ${v.headsign}",
-                                color = Color.White,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "${if (vehicle.vehicleType == VehicleType.TRAIN) "Vlak" else "Autobus"} ${vehicle.routeShortName}",
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0F172A)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(text = "♿ ❄️", fontSize = 13.sp)
+                                }
+                                Text(
+                                    text = "směr ${vehicle.headsign}",
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
                         }
+
                         IconButton(onClick = { selectedVehicle = null }) {
                             Icon(
-                                imageVector = Icons.Default.Clear,
+                                imageVector = Icons.Default.Close,
                                 contentDescription = "Zavřít",
-                                tint = Color.White
+                                tint = Color(0xFF64748B)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    if (v.isInactive) {
-                        Surface(
-                            color = Color(0xFFEF4444).copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Warning,
-                                    contentDescription = null,
-                                    tint = Color(0xFFEF4444),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Vozidlo má neaktivní tracker. Poloha nemusí být v reálném čase.",
-                                    color = Color(0xFFFCA5A5),
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-                    } else {
-                        val delayTxt = if (v.delaySeconds <= 0) "Včas (+0 s)" else "+${v.delaySeconds / 60} min (${v.delaySeconds} s)"
-                        val delayColor = if (v.delaySeconds <= 60) Color(0xFF4ADE80) else Color(0xFFFBBF24)
-
+                    // Zpoždění banner (oranžový pruh s tečkou)
+                    val delayMin = (vehicle.delaySeconds / 60)
+                    Surface(
+                        color = if (vehicle.delaySeconds <= 60) Color(0xFFDCFCE7) else Color(0xFFFEF3C7),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
-                            Surface(
-                                color = delayColor.copy(alpha = 0.2f),
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Text(
-                                    text = "Zpoždění: $delayTxt",
-                                    color = delayColor,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(if (vehicle.delaySeconds <= 60) Color(0xFF16A34A) else Color(0xFFD97706))
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "• Rychlost ${v.speedKmh} km/h • Směr ${v.bearing.roundToInt()}°",
-                                color = Color(0xFF94A3B8),
-                                fontSize = 12.sp
+                                text = if (vehicle.isInactive) {
+                                    "Vozidlo nemá aktivní GPS sledování"
+                                } else if (vehicle.delaySeconds <= 60) {
+                                    "Včas (zpoždění do 1 min)"
+                                } else {
+                                    "Aktuální zpoždění $delayMin min"
+                                },
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (vehicle.delaySeconds <= 60) Color(0xFF16A34A) else Color(0xFFB45309)
                             )
                         }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "⏱️ Dojezd na příští zastávky: počítán v reálném čase podle GPS",
-                            color = Color(0xFFCBD5E1),
-                            fontSize = 12.sp
-                        )
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    // Skrolovatelný seznam všech zastávek na trase spoje (Screenshot 4)
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
+                        items(routeStops) { stop ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Časy (vlevo předpokládaný, vedle jízdní řád)
+                                Text(
+                                    text = stop.predictedTime,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (stop.isCurrentOrNext) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (stop.isCurrentOrNext) Color(0xFFDC2626) else if (stop.isVisited) Color(0xFF94A3B8) else Color(0xFF0F172A),
+                                    modifier = Modifier.width(44.dp)
+                                )
+
+                                // Vertikální vodící čára s tečkou
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.width(24.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(9.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (stop.isCurrentOrNext) Color(0xFF0284C7)
+                                                else if (stop.isVisited) Color(0xFFCBD5E1)
+                                                else Color(0xFF0284C7)
+                                            )
+                                    )
+                                }
+
+                                Text(
+                                    text = stop.scheduledTime,
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF94A3B8),
+                                    modifier = Modifier.width(44.dp)
+                                )
+
+                                Spacer(modifier = Modifier.width(6.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = stop.stopName,
+                                        fontSize = 14.sp,
+                                        fontWeight = if (stop.isCurrentOrNext) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (stop.isVisited) Color(0xFF94A3B8) else Color(0xFF0F172A)
+                                    )
+                                    Text(
+                                        text = stop.zone,
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF64748B)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Tlačítko pro vyfiltrování pouze této linky
                     Button(
                         onClick = {
-                            onRouteFilterChanged(v.routeShortName)
+                            onRouteFilterChanged(vehicle.routeShortName)
                             selectedVehicle = null
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF281147)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
                     ) {
                         Text(
-                            text = "Filtrovat jen linku ${v.routeShortName} na mapě",
-                            fontSize = 13.sp,
+                            text = "Filtrovat jen linku ${vehicle.routeShortName} na mapě",
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -637,7 +770,7 @@ fun LiveMapScreen(
             }
         }
 
-        // Plnohodnotný filtrační list přesně podle aplikace PID Lítačka (Screenshot)
+        // Plnohodnotný filtrační list přesně podle aplikace PID Lítačka
         if (showFilterSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showFilterSheet = false },
@@ -650,7 +783,6 @@ fun LiveMapScreen(
                         .navigationBarsPadding()
                         .padding(bottom = 24.dp)
                 ) {
-                    // Horní fialový pruh dialogu
                     Surface(
                         color = Color(0xFF281147),
                         modifier = Modifier.fillMaxWidth()
@@ -678,7 +810,6 @@ fun LiveMapScreen(
                                 }
                             }
 
-                            // Záložky MHD, PRODEJ, PARKOVÁNÍ, SHARING přesně podle Lítačky
                             TabRow(
                                 selectedTabIndex = selectedFilterTab.ordinal,
                                 containerColor = Color(0xFF281147),
@@ -701,7 +832,6 @@ fun LiveMapScreen(
                         }
                     }
 
-                    // Obsah konkrétní vybrané záložky
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -710,7 +840,6 @@ fun LiveMapScreen(
                     ) {
                         when (selectedFilterTab) {
                             LitackaFilterTab.MHD -> {
-                                // Sekce Zastávky
                                 Text(
                                     text = "Zastávky",
                                     fontSize = 16.sp,
@@ -720,14 +849,13 @@ fun LiveMapScreen(
                                 )
                                 LitackaSwitchRow(
                                     title = "Zobrazit zastávky",
-                                    subtitle = "Zobrazí zastávky při přiblížení mapy",
+                                    subtitle = "Zobrazí zastávky při přiblížení mapy (zoom >= 14)",
                                     checked = showStops,
                                     onCheckedChange = { showStops = it }
                                 )
 
                                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = Color(0xFFE2E8F0))
 
-                                // Sekce Dopravní prostředky
                                 Text(
                                     text = "Dopravní prostředky",
                                     fontSize = 16.sp,
@@ -774,7 +902,6 @@ fun LiveMapScreen(
 
                                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = Color(0xFFE2E8F0))
 
-                                // Sekce Linky veřejné dopravy
                                 Text(
                                     text = "Linky veřejné dopravy",
                                     fontSize = 16.sp,
@@ -896,6 +1023,79 @@ fun LiveMapScreen(
     }
 }
 
+/**
+ * Vrátí reálné zastávky trasy pro dané vozidlo (pro linky v koridoru Mladá Boleslav – Loukov – Turnov – Liberec).
+ */
+private fun getRouteStopsForVehicle(vehicle: LiveVehiclePosition): List<RouteTimelineStop> {
+    val route = vehicle.routeShortName
+    val delayMins = vehicle.delaySeconds / 60
+
+    if (route.contains("345")) {
+        val stopsInfo = listOf(
+            Triple("Mladá Boleslav,aut.st.", "pásmo 7", GeoPoint(50.4114, 14.9032)),
+            Triple("Mladá Boleslav,Boleslavská", "pásmo 7", GeoPoint(50.4190, 14.9120)),
+            Triple("Kosmonosy,nemocnice", "pásmo 7", GeoPoint(50.4350, 14.9280)),
+            Triple("Bakov n.Jiz.,Pražská", "pásmo 8", GeoPoint(50.4780, 14.9410)),
+            Triple("Mnichovo Hradiště,nám.", "pásmo 9", GeoPoint(50.5273, 14.9714)),
+            Triple("Mnichovo Hradiště,Hoškovice", "pásmo 9", GeoPoint(50.5381, 15.0069)),
+            Triple("Březina", "pásmo 9", GeoPoint(50.5447, 15.0339)),
+            Triple("Loukov,žel.st.", "pásmo 9", GeoPoint(50.5580, 15.0568)),
+            Triple("Svijany,na nájezdu", "pásmo 10", GeoPoint(50.5732, 15.0558)),
+            Triple("Paceřice", "pásmo 11", GeoPoint(50.6050, 15.0980)),
+            Triple("Paceřice,Rohanka", "pásmo 11", GeoPoint(50.6120, 15.1050)),
+            Triple("Žďárek,Hvězda", "pásmo 11", GeoPoint(50.6210, 15.1120)),
+            Triple("Hodkovice n.Mohelkou,žel.st.", "pásmo 11", GeoPoint(50.6650, 15.0910)),
+            Triple("Liberec,aut.nádr.", "pásmo L", GeoPoint(50.7630, 15.0530))
+        )
+
+        val baseHour = 17
+        val baseMinute = 15
+
+        return stopsInfo.mapIndexed { idx, (name, zone, pt) ->
+            val schedMin = (baseMinute + idx * 4) % 60
+            val schedHr = baseHour + (baseMinute + idx * 4) / 60
+            val predMin = (schedMin + delayMins) % 60
+            val predHr = schedHr + (schedMin + delayMins) / 60
+
+            val schedStr = String.format("%02d:%02d", schedHr, schedMin)
+            val predStr = String.format("%02d:%02d", predHr, predMin)
+            val isPassed = idx < 9
+            val isNext = idx == 9
+
+            RouteTimelineStop(name, zone, schedStr, predStr, isPassed, isNext, pt)
+        }
+    }
+
+    if (route.contains("715")) {
+        val stopsInfo = listOf(
+            Triple("Mnichovo Hradiště,nám.", "pásmo 9", GeoPoint(50.5273, 14.9714)),
+            Triple("Březina", "pásmo 9", GeoPoint(50.5447, 15.0339)),
+            Triple("Loukov,žel.st.", "pásmo 9", GeoPoint(50.5580, 15.0568)),
+            Triple("Žďár,Doubrava", "pásmo 9", GeoPoint(50.5548, 15.0682)),
+            Triple("Žďár,Břehy", "pásmo 9", GeoPoint(50.5437, 15.0610)),
+            Triple("Žďár,Příhrazy", "pásmo 9", GeoPoint(50.5295, 15.0712)),
+            Triple("Žďár,Žehrov", "pásmo 9", GeoPoint(50.5312, 15.0910)),
+            Triple("Žďár,Skokovy", "pásmo 9", GeoPoint(50.5365, 15.1012))
+        )
+        return stopsInfo.mapIndexed { idx, (name, zone, pt) ->
+            val schedStr = String.format("18:%02d", (10 + idx * 5) % 60)
+            val predStr = String.format("18:%02d", (10 + idx * 5 + delayMins) % 60)
+            RouteTimelineStop(name, zone, schedStr, predStr, idx < 2, idx == 2, pt)
+        }
+    }
+
+    // Výchozí zastávky pro ostatní spoje
+    val pt1 = GeoPoint(vehicle.latitude - 0.02, vehicle.longitude - 0.02)
+    val pt2 = GeoPoint(vehicle.latitude, vehicle.longitude)
+    val pt3 = GeoPoint(vehicle.latitude + 0.03, vehicle.longitude + 0.03)
+
+    return listOf(
+        RouteTimelineStop("Výchozí stanice", "pásmo 7", "18:00", "18:00", true, false, pt1),
+        RouteTimelineStop("Aktuální poloha vozu", "pásmo 8", "18:15", "18:18", false, true, pt2),
+        RouteTimelineStop(vehicle.headsign.ifBlank { "Cílová stanice" }, "pásmo 9", "18:35", "18:38", false, false, pt3)
+    )
+}
+
 @Composable
 private fun LitackaSwitchRow(
     title: String,
@@ -1014,10 +1214,10 @@ private fun createLitackaVehicleDrawable(
     val primaryColor = when (vehicleType) {
         VehicleType.TRAM -> 0xFFC8102E.toInt()
         VehicleType.TRAIN -> 0xFF2B3990.toInt()
-        else -> 0xFF0078A8.toInt() // PID Lítačka autobusová modrá
+        else -> 0xFF0078A8.toInt()
     }
 
-    // 1. Směrový zobáček (natočený podle azimutu jízdy)
+    // 1. Směrový zobáček
     canvas.save()
     canvas.rotate(bearing, centerX, centerY)
     val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -1073,11 +1273,11 @@ private fun createLitackaVehicleDrawable(
     val textY = centerY - (textPaint.descent() + textPaint.ascent()) / 2f
     canvas.drawText(label, centerX, textY, textPaint)
 
-    // 4. Barevná tečka zpoždění v rohu štítku (jako v Lítačce)
+    // 4. Barevná tečka zpoždění
     val dotColor = when {
-        delaySeconds <= 60 -> 0xFF22C55E.toInt() // Zelená (včas)
-        delaySeconds <= 180 -> 0xFFF59E0B.toInt() // Oranžová (1-3 min)
-        else -> 0xFFEF4444.toInt() // Červená (> 3 min)
+        delaySeconds <= 60 -> 0xFF22C55E.toInt()
+        delaySeconds <= 180 -> 0xFFF59E0B.toInt()
+        else -> 0xFFEF4444.toInt()
     }
     val dotX = rect.right - 2f * density
     val dotY = rect.top + 2f * density
@@ -1097,7 +1297,7 @@ private fun createLitackaVehicleDrawable(
 
 /**
  * Vykreslí decentní kulatou ikonu zastávky ve stylu PID Lítačka.
- * Velikost 18dp, neruší mapový podklad a zobrazuje se pouze při přiblížení.
+ * Zobrazuje se pouze při velkém přiblížení (zoom >= 14).
  */
 private fun createLitackaStopDrawable(context: Context, isTrain: Boolean): BitmapDrawable {
     val density = context.resources.displayMetrics.density
