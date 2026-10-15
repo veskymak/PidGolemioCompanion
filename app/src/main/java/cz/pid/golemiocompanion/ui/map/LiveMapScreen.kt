@@ -42,12 +42,34 @@ import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.tileprovider.tilesource.XYTileSource
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
-import kotlin.math.roundToInt
+import android.util.LruCache
+import kotlin.math.*
+
+/**
+ * Keš vygenerovaných směrových štítků vozidel pro eliminaci zasekávání a paměťových špiček.
+ */
+private val vehicleDrawableCache = object : LruCache<String, BitmapDrawable>(400) {}
+
+/**
+ * Spočítá vzdálenost mezi dvěma body na zemi v kilometrech.
+ */
+private fun distanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val a = sin(dLat / 2).let { it * it } +
+            cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
+            sin(dLon / 2).let { it * it }
+    val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return 6371.0 * c
+}
 
 /**
  * Světlý čistý mapový podklad ve stylu aplikace PID Lítačka (CartoDB Voyager) s licencovaným API klíčem.
@@ -135,6 +157,8 @@ fun LiveMapScreen(
         true
     }
 
+    var currentZoomLevel by remember { mutableDoubleStateOf(14.0) }
+
     val mapView = remember {
         MapView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
@@ -148,6 +172,13 @@ fun LiveMapScreen(
             controller.setCenter(
                 GeoPoint(uiState.selectedStop.latitude, uiState.selectedStop.longitude)
             )
+            addMapListener(object : MapListener {
+                override fun onScroll(event: ScrollEvent?): Boolean = false
+                override fun onZoom(event: ZoomEvent?): Boolean {
+                    currentZoomLevel = zoomLevelDouble
+                    return false
+                }
+            })
         }
     }
 
@@ -292,23 +323,66 @@ fun LiveMapScreen(
                         map.overlays.add(userMarker)
                     }
 
-                    // 5. Vrstva živých vozidel (směrové šipky + tečka zpoždění)
-                    val filteredVehicles = uiState.liveVehicles.filter { v ->
-                        val typeMatches = when (v.vehicleType) {
-                            VehicleType.BUS -> showBuses
-                            VehicleType.TROLLEYBUS -> showTrolleybuses
-                            VehicleType.TRAM -> showTrams
-                            VehicleType.TRAIN -> showTrains
-                            VehicleType.METRO -> showMetro
-                            VehicleType.FERRY -> showFerries
-                        }
-                        val routeMatches = if (uiState.mapRouteFilter.isBlank()) {
-                            true
-                        } else {
-                            v.routeShortName.contains(uiState.mapRouteFilter.trim(), ignoreCase = true)
-                        }
-                        typeMatches && routeMatches
+                    // 5. Vrstva živých vozidel s inteligentním ořezem vzdálenosti a optimalizací výkonu
+                    val isRouteFilterActive = uiState.mapRouteFilter.isNotBlank()
+                    val currentZoom = map.zoomLevelDouble
+                    val centerLat = map.mapCenter?.latitude ?: uiState.selectedStop.latitude
+                    val centerLon = map.mapCenter?.longitude ?: uiState.selectedStop.longitude
+                    val bbox = runCatching { map.boundingBox }.getOrNull()
+
+                    // Maximální povolená vzdálenost od středu zobrazení podle úrovně přiblížení
+                    val maxDistanceKm = when {
+                        isRouteFilterActive -> 120.0 // Při vyhledávání konkrétní linky vykreslit všechny její vozy
+                        currentZoom >= 15.0 -> 3.5
+                        currentZoom >= 14.0 -> 5.5
+                        currentZoom >= 13.0 -> 8.5
+                        currentZoom >= 12.0 -> 13.0
+                        currentZoom >= 11.2 -> 18.0
+                        else -> 0.0 // Při velkém oddálení (zoom < 11.2) skrýt městské busy
                     }
+
+                    val filteredVehicles = uiState.liveVehicles.asSequence()
+                        .filter { v ->
+                            val typeMatches = when (v.vehicleType) {
+                                VehicleType.BUS -> showBuses
+                                VehicleType.TROLLEYBUS -> showTrolleybuses
+                                VehicleType.TRAM -> showTrams
+                                VehicleType.TRAIN -> showTrains
+                                VehicleType.METRO -> showMetro
+                                VehicleType.FERRY -> showFerries
+                            }
+                            val routeMatches = if (!isRouteFilterActive) {
+                                true
+                            } else {
+                                v.routeShortName.contains(uiState.mapRouteFilter.trim(), ignoreCase = true)
+                            }
+                            typeMatches && routeMatches
+                        }
+                        .filter { v ->
+                            if (isRouteFilterActive) return@filter true
+
+                            // Pokud je zoom velmi malý (< 11.2), zobrazit pouze dálkové/regionální vlaky do 40 km
+                            if (currentZoom < 11.2) {
+                                if (v.vehicleType == VehicleType.TRAIN && showTrains) {
+                                    distanceKm(centerLat, centerLon, v.latitude, v.longitude) <= 40.0
+                                } else {
+                                    false
+                                }
+                            } else {
+                                // Kontrola viditelnosti v okně mapy (Bounding Box s rezervou 15 %)
+                                val inViewport = bbox?.let { b ->
+                                    val latMargin = (b.latNorth - b.latSouth) * 0.15
+                                    val lonMargin = (b.lonEast - b.lonWest) * 0.15
+                                    v.latitude in (b.latSouth - latMargin)..(b.latNorth + latMargin) &&
+                                    v.longitude in (b.lonWest - lonMargin)..(b.lonEast + lonMargin)
+                                } ?: true
+
+                                inViewport && distanceKm(centerLat, centerLon, v.latitude, v.longitude) <= maxDistanceKm
+                            }
+                        }
+                        .sortedBy { v -> distanceKm(centerLat, centerLon, v.latitude, v.longitude) }
+                        .take(if (isRouteFilterActive) 50 else 120) // Limit maximálně 120 nejbližších vozidel pro plynulých 60-120 FPS
+                        .toList()
 
                     filteredVehicles.forEach { vehicle ->
                         val marker = Marker(map).apply {
@@ -334,6 +408,38 @@ fun LiveMapScreen(
                     map.invalidate()
                 }
             )
+        }
+
+        // Informační proužek při velkém oddálení mapy
+        if (currentZoomLevel < 11.2 && uiState.mapRouteFilter.isBlank() && mapDisplayMode != MapDisplayMode.MAPA_PID_WEB) {
+            Surface(
+                color = Color(0xFF1E293B).copy(alpha = 0.92f),
+                shape = RoundedCornerShape(20.dp),
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 118.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ZoomIn,
+                        contentDescription = null,
+                        tint = Color(0xFF38BDF8),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Přibližte mapu pro zobrazení spojů MHD",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
         }
 
         // Horní lišta ve stylu PID Lítačka
@@ -1197,6 +1303,17 @@ private fun createLitackaVehicleDrawable(
     vehicleType: VehicleType,
     showExtendedDelay: Boolean
 ): BitmapDrawable {
+    val roundedBearing = ((bearing + 11.25f) / 22.5f).toInt() % 16
+    val delayBracket = when {
+        delaySeconds <= 60 -> 0
+        delaySeconds <= 180 -> 1
+        else -> 2
+    }
+    val delayMins = if (showExtendedDelay && delaySeconds >= 60) delaySeconds / 60 else 0
+    val cacheKey = "${routeShortName}_${roundedBearing}_${delayBracket}_${delayMins}_${vehicleType}"
+
+    vehicleDrawableCache.get(cacheKey)?.let { return it }
+
     val density = context.resources.displayMetrics.density
     val label = if (showExtendedDelay && delaySeconds >= 60) {
         "$routeShortName +${delaySeconds / 60}m"
@@ -1292,7 +1409,9 @@ private fun createLitackaVehicleDrawable(
     canvas.drawCircle(dotX, dotY, 4.8f * density, dotBorder)
     canvas.drawCircle(dotX, dotY, 3.5f * density, dotFill)
 
-    return BitmapDrawable(context.resources, bitmap)
+    val drawable = BitmapDrawable(context.resources, bitmap)
+    vehicleDrawableCache.put(cacheKey, drawable)
+    return drawable
 }
 
 /**
