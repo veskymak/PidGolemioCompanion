@@ -157,9 +157,14 @@ fun ActiveCountdownBanner(
 
 fun formatDelayLabel(delaySeconds: Int, isDelayAvailable: Boolean): String {
     if (!isDelayAvailable) return "dle JŘ"
+    if (delaySeconds in -30..30) return "včas"
+    val absSec = kotlin.math.abs(delaySeconds)
+    val sign = if (delaySeconds > 0) "+" else "-"
+    val m = absSec / 60
+    val s = absSec % 60
     return when {
-        delaySeconds == 0 -> "včas"
-        delaySeconds > 0 -> "+${delaySeconds}s"
-        else -> "${delaySeconds}s"
+        m > 0 && s > 0 -> "$sign$m min $s s"
+        m > 0 -> "$sign$m min"
+        else -> "$sign${s}s"
     }
 }

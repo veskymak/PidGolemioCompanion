@@ -441,57 +441,88 @@ private fun DepartureRowCard(
             )
         }
 
-        Spacer(modifier = Modifier.width(14.dp))
+        Spacer(modifier = Modifier.width(12.dp))
 
         // Směr a přesný čas JŘ + zpoždění Golemio
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = departure.headsign,
                 color = Color.White,
-                fontSize = 17.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(3.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val platformText = departure.platformCode?.let { "Nástupiště $it • " } ?: ""
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val platformText = departure.platformCode?.let { "Nást. $it • " } ?: ""
                 Text(
-                    text = "${platformText}JŘ ${departure.scheduledTimeFormatted} ",
+                    text = "${platformText}JŘ ${departure.scheduledTimeFormatted}",
                     color = Color(0xFF94A3B8),
-                    fontSize = 13.sp
+                    fontSize = 12.5.sp,
+                    maxLines = 1
                 )
-                Text(
-                    text = "(${formatDelayLabel(departure.delaySeconds, departure.isDelayAvailable)})",
-                    color = delayColor,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                val delayFormatted = if (departure.isDelayAvailable) {
+                    if (departure.delaySeconds in -30..30) "včas"
+                    else {
+                        val m = kotlin.math.abs(departure.delaySeconds) / 60
+                        val s = kotlin.math.abs(departure.delaySeconds) % 60
+                        val sign = if (departure.delaySeconds > 0) "+" else "-"
+                        if (m > 0 && s > 0) "$sign$m min $s s"
+                        else if (m > 0) "$sign$m min"
+                        else "$sign${s}s"
+                    }
+                } else "dle JŘ"
+
+                Surface(
+                    color = delayColor.copy(alpha = 0.18f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = delayFormatted,
+                        color = delayColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                }
             }
         }
 
         Spacer(modifier = Modifier.width(8.dp))
 
         // Odpočet a hvězdička
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                text = countdownText,
-                color = if (remainingSeconds < 60) Color(0xFF38BDF8) else Color(0xFF60A5FA),
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-            Text(
-                text = if (isTracked) "Odpočet běží" else "Spustit odpočet",
-                color = if (isTracked) Color(0xFFFBBF24) else Color(0xFF94A3B8),
-                fontSize = 11.sp
-            )
-        }
-
-        IconButton(onClick = onToggleTrack) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = countdownText,
+                    color = if (remainingSeconds < 60) Color(0xFF38BDF8) else Color(0xFF60A5FA),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1
+                )
+                Text(
+                    text = if (isTracked) "Odpočet běží" else "Spustit",
+                    color = if (isTracked) Color(0xFFFBBF24) else Color(0xFF94A3B8),
+                    fontSize = 10.sp,
+                    maxLines = 1
+                )
+            }
             Icon(
                 imageVector = if (isTracked) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                contentDescription = "Spustit odpočet",
-                tint = if (isTracked) Color(0xFFFBBF24) else Color(0xFFFBBF24).copy(alpha = 0.75f)
+                contentDescription = null,
+                tint = if (isTracked) Color(0xFFFBBF24) else Color(0xFF94A3B8).copy(alpha = 0.5f),
+                modifier = Modifier
+                    .size(24.dp)
+                    .padding(start = 2.dp)
             )
         }
     }
