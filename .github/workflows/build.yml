@@ -24,12 +24,12 @@ jobs:
       - name: 3. Příprava Gradle a ověření Gradle Wrapperu
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.13'
 
       - name: 4. Vygenerování gradlew skriptu (pokud v repozitáři ještě není) a nastavení práv
         run: |
           if [ ! -f "./gradlew" ]; then
-            gradle wrapper --gradle-version 8.9
+            gradle wrapper --gradle-version 8.13
           fi
           chmod +x gradlew
 
