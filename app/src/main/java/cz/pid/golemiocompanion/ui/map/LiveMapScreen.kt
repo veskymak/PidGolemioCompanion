@@ -24,8 +24,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import java.time.OffsetDateTime
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -124,6 +128,7 @@ fun LiveMapScreen(
     onRouteFilterChanged: (String) -> Unit,
     onSelectStopFromMap: (PidStop) -> Unit,
     onRequestGpsLocation: () -> Unit,
+    onTrackVehicle: (String, String, Long) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -225,33 +230,23 @@ fun LiveMapScreen(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        if (mapDisplayMode == MapDisplayMode.MAPA_PID_WEB) {
-            // Integrovaná oficiální webová mapa PID Lítačka (mapa.pid.cz)
+        // 1. Nativní mapa se všemi vrstvami (vždy zachována v Boxu pro prevenci pádu "child already has a parent")
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (mapDisplayMode == MapDisplayMode.MAPA_PID_WEB) Modifier.alpha(0f)
+                    else Modifier.alpha(1f)
+                )
+        ) {
             AndroidView(
                 factory = { ctx ->
-                    WebView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.setGeolocationEnabled(true)
-                        settings.cacheMode = WebSettings.LOAD_NO_CACHE
-                        webViewClient = WebViewClient()
-                        val lat = uiState.selectedStop.latitude
-                        val lon = uiState.selectedStop.longitude
-                        loadUrl("https://mapa.pid.cz/?lat=$lat&lng=$lon&zoom=14")
-                    }
+                    (mapView.parent as? ViewGroup)?.removeView(mapView)
+                    mapView
                 },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            // Nativní mapa se všemi vrstvami a zrychleným vykreslováním
-            AndroidView(
-                factory = { mapView },
                 modifier = Modifier.fillMaxSize(),
                 update = { map ->
+                    if (mapDisplayMode == MapDisplayMode.MAPA_PID_WEB) return@AndroidView
                     map.overlays.clear()
 
                     // Vykreslení trasy vybraného vozidla (modrá linka jako v Lítačce)
@@ -268,22 +263,31 @@ fun LiveMapScreen(
                         }
                     }
 
-                    // 1. Vrstva zastávek (pouze při zapnutí a zoomu >= 14, aby nikdy nevisely v polích)
-                    if (showStops && map.zoomLevelDouble >= 14.0) {
-                        PidStopDirectory.allStops.forEach { stop ->
-                            val marker = Marker(map).apply {
-                                position = GeoPoint(stop.latitude, stop.longitude)
-                                title = stop.displayName
-                                snippet = "Klepnutím zobrazíte odjezdy (${stop.region})"
-                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                                icon = createLitackaStopDrawable(context, stop.isTrain)
-                                setOnMarkerClickListener { _, _ ->
-                                    onSelectStopFromMap(stop)
-                                    true
+                    // 1. Vrstva zastávek (pouze při zapnutí a zoomu >= 13.5, filtrovaná na viditelný výřez mapy)
+                    if (showStops && map.zoomLevelDouble >= 13.5) {
+                        val bbox = map.boundingBox
+                        val minLat = bbox.latSouth
+                        val maxLat = bbox.latNorth
+                        val minLon = bbox.lonWest
+                        val maxLon = bbox.lonEast
+
+                        PidStopDirectory.allStops
+                            .filter { it.latitude in minLat..maxLat && it.longitude in minLon..maxLon }
+                            .take(120)
+                            .forEach { stop ->
+                                val marker = Marker(map).apply {
+                                    position = GeoPoint(stop.latitude, stop.longitude)
+                                    title = stop.displayName
+                                    snippet = "Klepnutím zobrazíte odjezdy (${stop.region})"
+                                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                                    icon = createLitackaStopDrawable(context, stop.isTrain)
+                                    setOnMarkerClickListener { _, _ ->
+                                        onSelectStopFromMap(stop)
+                                        true
+                                    }
                                 }
+                                map.overlays.add(marker)
                             }
-                            map.overlays.add(marker)
-                        }
                     }
 
                     // 2. Vrstva P+R parkovišť
@@ -407,6 +411,29 @@ fun LiveMapScreen(
 
                     map.invalidate()
                 }
+            )
+        }
+
+        // 2. Integrovaná oficiální webová mapa PID Lítačka (mapa.pid.cz)
+        if (mapDisplayMode == MapDisplayMode.MAPA_PID_WEB) {
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.setGeolocationEnabled(true)
+                        settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                        webViewClient = WebViewClient()
+                        val lat = uiState.selectedStop.latitude
+                        val lon = uiState.selectedStop.longitude
+                        loadUrl("https://mapa.pid.cz/?lat=$lat&lng=$lon&zoom=14")
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
             )
         }
 
@@ -788,6 +815,40 @@ fun LiveMapScreen(
                         }
                     }
 
+                    // Tlačítko pro okamžité sledování spoje v ostrůvku / notifikaci
+                    Surface(
+                        onClick = {
+                            val targetMillis = System.currentTimeMillis() + 6 * 60 * 1000L
+                            onTrackVehicle(vehicle.routeShortName, vehicle.headsign, targetMillis)
+                        },
+                        color = Color(0xFF0284C7),
+                        shape = RoundedCornerShape(10.dp),
+                        shadowElevation = 2.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.NotificationsActive,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Sledovat spoj v notifikaci",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
                     // Skrolovatelný seznam všech zastávek na trase spoje (Screenshot 4)
                     LazyColumn(
                         modifier = Modifier
@@ -1132,74 +1193,242 @@ fun LiveMapScreen(
 /**
  * Vrátí reálné zastávky trasy pro dané vozidlo (pro linky v koridoru Mladá Boleslav – Loukov – Turnov – Liberec).
  */
+/**
+ * Vrátí reálné zastávky trasy pro dané vozidlo s přesným časem odpovídajícím aktuální jízdě a směru.
+ */
 private fun getRouteStopsForVehicle(vehicle: LiveVehiclePosition): List<RouteTimelineStop> {
-    val route = vehicle.routeShortName
-    val delayMins = vehicle.delaySeconds / 60
+    val route = vehicle.routeShortName.trim()
+    val headsign = vehicle.headsign.trim()
 
-    if (route.contains("345")) {
-        val stopsInfo = listOf(
-            Triple("Mladá Boleslav,aut.st.", "pásmo 7", GeoPoint(50.4114, 14.9032)),
-            Triple("Mladá Boleslav,Boleslavská", "pásmo 7", GeoPoint(50.4190, 14.9120)),
-            Triple("Kosmonosy,nemocnice", "pásmo 7", GeoPoint(50.4350, 14.9280)),
-            Triple("Bakov n.Jiz.,Pražská", "pásmo 8", GeoPoint(50.4780, 14.9410)),
-            Triple("Mnichovo Hradiště,nám.", "pásmo 9", GeoPoint(50.5273, 14.9714)),
-            Triple("Mnichovo Hradiště,Hoškovice", "pásmo 9", GeoPoint(50.5381, 15.0069)),
-            Triple("Březina", "pásmo 9", GeoPoint(50.5447, 15.0339)),
-            Triple("Loukov,žel.st.", "pásmo 9", GeoPoint(50.5580, 15.0568)),
-            Triple("Svijany,na nájezdu", "pásmo 10", GeoPoint(50.5732, 15.0558)),
-            Triple("Paceřice", "pásmo 11", GeoPoint(50.6050, 15.0980)),
-            Triple("Paceřice,Rohanka", "pásmo 11", GeoPoint(50.6120, 15.1050)),
-            Triple("Žďárek,Hvězda", "pásmo 11", GeoPoint(50.6210, 15.1120)),
-            Triple("Hodkovice n.Mohelkou,žel.st.", "pásmo 11", GeoPoint(50.6650, 15.0910)),
-            Triple("Liberec,aut.nádr.", "pásmo L", GeoPoint(50.7630, 15.0530))
-        )
+    // Aktuální čas vozidla z pingu nebo ze systému
+    val now = runCatching {
+        if (!vehicle.originTimestamp.isNullOrBlank()) {
+            OffsetDateTime.parse(vehicle.originTimestamp).toZonedDateTime()
+        } else {
+            ZonedDateTime.now()
+        }
+    }.getOrElse { ZonedDateTime.now() }
 
-        val baseHour = 17
-        val baseMinute = 15
+    val rawStops: List<Triple<String, String, GeoPoint>> = when {
+        // Linka 764
+        route == "764" || route.contains("764") -> {
+            val toMladaBoleslav = headsign.contains("Boleslav", ignoreCase = true)
+            val fullStops = listOf(
+                Triple("Dolní Bousov,nám.", "pásmo 7", GeoPoint(50.4392, 15.1269)),
+                Triple("Březno", "pásmo 7", GeoPoint(50.4058, 15.0086)),
+                Triple("Kolomuty", "pásmo 7", GeoPoint(50.4044, 14.9806)),
+                Triple("Řepov", "pásmo 7", GeoPoint(50.4067, 14.9606)),
+                Triple("Mladá Boleslav,Olympia", "pásmo 7", GeoPoint(50.4178, 14.9389)),
+                Triple("Mladá Boleslav,Jičínská", "pásmo 7", GeoPoint(50.4192, 14.9218)),
+                Triple("Mladá Boleslav,Škoda,Hlavní brána", "pásmo 7", GeoPoint(50.4188, 14.9135)),
+                Triple("Mladá Boleslav,aut.st.", "pásmo 7", GeoPoint(50.4150, 14.9094))
+            )
+            if (toMladaBoleslav) fullStops else fullStops.reversed()
+        }
 
-        return stopsInfo.mapIndexed { idx, (name, zone, pt) ->
-            val schedMin = (baseMinute + idx * 4) % 60
-            val schedHr = baseHour + (baseMinute + idx * 4) / 60
-            val predMin = (schedMin + delayMins) % 60
-            val predHr = schedHr + (schedMin + delayMins) / 60
+        // Linka 715
+        route == "715" || route.contains("715") -> {
+            val toMladaBoleslav = headsign.contains("Boleslav", ignoreCase = true)
+            val toMnichovoHradiste = headsign.contains("Hradiště", ignoreCase = true) || headsign.contains("Hradiste", ignoreCase = true)
+            val toZdarLoukov = headsign.contains("Žďár", ignoreCase = true) ||
+                    headsign.contains("Zdar", ignoreCase = true) ||
+                    headsign.contains("Loukov", ignoreCase = true) ||
+                    headsign.contains("Doubrava", ignoreCase = true) ||
+                    headsign.contains("Žehrov", ignoreCase = true)
 
-            val schedStr = String.format("%02d:%02d", schedHr, schedMin)
-            val predStr = String.format("%02d:%02d", predHr, predMin)
-            val isPassed = idx < 9
-            val isNext = idx == 9
+            when {
+                toMladaBoleslav -> listOf(
+                    Triple("Mnichovo Hradiště,dopr.term.", "pásmo 9", GeoPoint(50.5230, 14.9760)),
+                    Triple("Mnichovo Hradiště,nám.", "pásmo 9", GeoPoint(50.5273, 14.9714)),
+                    Triple("Mnichovo Hradiště,u hřbitova", "pásmo 9", GeoPoint(50.5200, 14.9600)),
+                    Triple("Bakov n.Jiz.,žel.zast.", "pásmo 8", GeoPoint(50.4820, 14.9450)),
+                    Triple("Bakov n.Jiz.,nám.", "pásmo 8", GeoPoint(50.4800, 14.9420)),
+                    Triple("Kosmonosy,nemocnice", "pásmo 7", GeoPoint(50.4350, 14.9280)),
+                    Triple("Mladá Boleslav,Boleslavská", "pásmo 7", GeoPoint(50.4190, 14.9120)),
+                    Triple("Mladá Boleslav,aut.st.", "pásmo 7", GeoPoint(50.4114, 14.9032))
+                )
+                toMnichovoHradiste -> listOf(
+                    Triple("Mladá Boleslav,aut.st.", "pásmo 7", GeoPoint(50.4114, 14.9032)),
+                    Triple("Mladá Boleslav,Boleslavská", "pásmo 7", GeoPoint(50.4190, 14.9120)),
+                    Triple("Kosmonosy,nemocnice", "pásmo 7", GeoPoint(50.4350, 14.9280)),
+                    Triple("Bakov n.Jiz.,nám.", "pásmo 8", GeoPoint(50.4800, 14.9420)),
+                    Triple("Bakov n.Jiz.,žel.zast.", "pásmo 8", GeoPoint(50.4820, 14.9450)),
+                    Triple("Mnichovo Hradiště,u hřbitova", "pásmo 9", GeoPoint(50.5200, 14.9600)),
+                    Triple("Mnichovo Hradiště,nám.", "pásmo 9", GeoPoint(50.5273, 14.9714)),
+                    Triple("Mnichovo Hradiště,dopr.term.", "pásmo 9", GeoPoint(50.5230, 14.9760))
+                )
+                toZdarLoukov -> listOf(
+                    Triple("Mnichovo Hradiště,dopr.term.", "pásmo 9", GeoPoint(50.5230, 14.9760)),
+                    Triple("Mnichovo Hradiště,nám.", "pásmo 9", GeoPoint(50.5273, 14.9714)),
+                    Triple("Březina", "pásmo 9", GeoPoint(50.5447, 15.0339)),
+                    Triple("Loukov u Mn.Hradiště", "pásmo 9", GeoPoint(50.5580, 15.0568)),
+                    Triple("Žďár,Doubrava", "pásmo 9", GeoPoint(50.5548, 15.0682)),
+                    Triple("Žďár,Břehy", "pásmo 9", GeoPoint(50.5437, 15.0610)),
+                    Triple("Žďár,Příhrazy", "pásmo 9", GeoPoint(50.5295, 15.0712)),
+                    Triple("Žďár,Žehrov", "pásmo 9", GeoPoint(50.5312, 15.0910)),
+                    Triple("Žďár,Skokovy", "pásmo 9", GeoPoint(50.5365, 15.1012))
+                )
+                else -> listOf(
+                    Triple("Mnichovo Hradiště,dopr.term.", "pásmo 9", GeoPoint(50.5230, 14.9760)),
+                    Triple("Mnichovo Hradiště,nám.", "pásmo 9", GeoPoint(50.5273, 14.9714)),
+                    Triple("Bakov n.Jiz.,nám.", "pásmo 8", GeoPoint(50.4800, 14.9420)),
+                    Triple("Kosmonosy,nemocnice", "pásmo 7", GeoPoint(50.4350, 14.9280)),
+                    Triple(headsign.ifBlank { "Mladá Boleslav,aut.st." }, "pásmo 7", GeoPoint(50.4114, 14.9032))
+                )
+            }
+        }
 
-            RouteTimelineStop(name, zone, schedStr, predStr, isPassed, isNext, pt)
+        // Linka 345
+        route == "345" || route.contains("345") -> {
+            val toLiberec = headsign.contains("Liberec", ignoreCase = true)
+            val fullStops = listOf(
+                Triple("Mladá Boleslav,aut.st.", "pásmo 7", GeoPoint(50.4114, 14.9032)),
+                Triple("Mladá Boleslav,Boleslavská", "pásmo 7", GeoPoint(50.4190, 14.9120)),
+                Triple("Kosmonosy,nemocnice", "pásmo 7", GeoPoint(50.4350, 14.9280)),
+                Triple("Bakov n.Jiz.,Pražská", "pásmo 8", GeoPoint(50.4780, 14.9410)),
+                Triple("Mnichovo Hradiště,nám.", "pásmo 9", GeoPoint(50.5273, 14.9714)),
+                Triple("Mnichovo Hradiště,Hoškovice", "pásmo 9", GeoPoint(50.5381, 15.0069)),
+                Triple("Březina", "pásmo 9", GeoPoint(50.5447, 15.0339)),
+                Triple("Loukov u Mn.Hradiště", "pásmo 9", GeoPoint(50.5580, 15.0568)),
+                Triple("Svijany,na nájezdu", "pásmo 10", GeoPoint(50.5732, 15.0558)),
+                Triple("Paceřice", "pásmo 11", GeoPoint(50.6050, 15.0980)),
+                Triple("Paceřice,Rohanka", "pásmo 11", GeoPoint(50.6120, 15.1050)),
+                Triple("Žďárek,Hvězda", "pásmo 11", GeoPoint(50.6210, 15.1120)),
+                Triple("Hodkovice n.Mohelkou,žel.st.", "pásmo 11", GeoPoint(50.6650, 15.0910)),
+                Triple("Liberec,aut.nádr.", "pásmo L", GeoPoint(50.7630, 15.0530))
+            )
+            if (toLiberec) fullStops else fullStops.reversed()
+        }
+
+        // Linka 714
+        route == "714" || route.contains("714") -> {
+            listOf(
+                Triple("Mnichovo Hradiště,dopr.term.", "pásmo 9", GeoPoint(50.5230, 14.9760)),
+                Triple("Mnichovo Hradiště,nám.", "pásmo 9", GeoPoint(50.5273, 14.9714)),
+                Triple("Březina", "pásmo 9", GeoPoint(50.5447, 15.0339)),
+                Triple("Loukov u Mn.Hradiště", "pásmo 9", GeoPoint(50.5580, 15.0568)),
+                Triple("Svijany", "pásmo 10", GeoPoint(50.5732, 15.0558)),
+                Triple("Příšovice", "pásmo 10", GeoPoint(50.5780, 15.0950)),
+                Triple("Turnov,aut.nádr.", "pásmo 11", GeoPoint(50.5873, 15.1568))
+            )
+        }
+
+        // Linka 412
+        route == "412" || route.contains("412") -> {
+            val toKlaster = headsign.contains("Klášter", ignoreCase = true) || headsign.contains("Klaster", ignoreCase = true) || headsign.contains("Hradiště", ignoreCase = true)
+            val fullStops = listOf(
+                Triple("Mladá Boleslav,aut.st.", "pásmo 7", GeoPoint(50.4150, 14.9094)),
+                Triple("Mladá Boleslav,Václavkova", "pásmo 7", GeoPoint(50.4201, 14.9089)),
+                Triple("Kosmonosy,nám.", "pásmo 7", GeoPoint(50.4397, 14.9258)),
+                Triple("Bradlec", "pásmo 7", GeoPoint(50.4536, 14.9178)),
+                Triple("Bakov nad Jizerou,nám.", "pásmo 8", GeoPoint(50.4828, 14.9411)),
+                Triple("Mnichovo Hradiště,nám.", "pásmo 9", GeoPoint(50.5273, 14.9714)),
+                Triple("Klášter Hradiště nad Jizerou", "pásmo 9", GeoPoint(50.5256, 14.9469))
+            )
+            if (toKlaster) fullStops else fullStops.reversed()
+        }
+
+        // Linka 442
+        route == "442" || route.contains("442") -> {
+            val toBela = headsign.contains("Bělá", ignoreCase = true) || headsign.contains("Bela", ignoreCase = true)
+            val fullStops = listOf(
+                Triple("Mladá Boleslav,aut.st.", "pásmo 7", GeoPoint(50.4150, 14.9094)),
+                Triple("Kosmonosy,nám.", "pásmo 7", GeoPoint(50.4397, 14.9258)),
+                Triple("Josefův Důl", "pásmo 7", GeoPoint(50.4472, 14.9006)),
+                Triple("Bakov nad Jizerou,nám.", "pásmo 8", GeoPoint(50.4828, 14.9411)),
+                Triple("Bělá pod Bezdězem", "pásmo 8", GeoPoint(50.5015, 14.8080))
+            )
+            if (toBela) fullStops else fullStops.reversed()
+        }
+
+        // Vlakové linky (R22, S3, S30, S36)
+        vehicle.vehicleType == VehicleType.TRAIN || route.startsWith("S", ignoreCase = true) || route.startsWith("R", ignoreCase = true) || route.startsWith("Os", ignoreCase = true) -> {
+            val toTurnov = headsign.contains("Turnov", ignoreCase = true) || headsign.contains("Liberec", ignoreCase = true)
+            val fullStops = listOf(
+                Triple("Praha,hl.n.", "pásmo P", GeoPoint(50.0831, 14.4353)),
+                Triple("Praha,Vysočany", "pásmo 0", GeoPoint(50.1117, 14.5022)),
+                Triple("Mladá Boleslav,hl.n.", "pásmo 7", GeoPoint(50.4055, 14.8920)),
+                Triple("Mladá Boleslav,město", "pásmo 7", GeoPoint(50.4148, 14.9082)),
+                Triple("Bakov nad Jizerou,žel.st.", "pásmo 8", GeoPoint(50.4789, 14.9297)),
+                Triple("Mnichovo Hradiště,žel.st.", "pásmo 9", GeoPoint(50.5222, 14.9792)),
+                Triple("Březina u Mn.Hradiště", "pásmo 9", GeoPoint(50.5482, 15.0345)),
+                Triple("Loukov u Mn.Hradiště", "pásmo 9", GeoPoint(50.558098, 15.056853)),
+                Triple("Příšovice", "pásmo 10", GeoPoint(50.5761, 15.0867)),
+                Triple("Turnov,žel.st.", "pásmo 11", GeoPoint(50.5915, 15.1438))
+            )
+            if (toTurnov) fullStops else fullStops.reversed()
+        }
+
+        // Všechny ostatní linky v síti PID - VÝHRADNĚ REÁLNÉ FYZICKÉ ZASTÁVKY Z KATALOGU PID!
+        else -> {
+            val destStop = PidStopDirectory.findStopOrCreateCustom(headsign)
+
+            // 1. Reálná zastávka nejblíže aktuální poloze vozu
+            val nearestStopToVehicle = PidStopDirectory.allStops.minByOrNull { stop ->
+                distanceKm(vehicle.latitude, vehicle.longitude, stop.latitude, stop.longitude)
+            } ?: destStop
+
+            // 2. Reálné zastávky na koridoru mezi vozem a cílovou stanicí
+            val stopsAlongCorridor = PidStopDirectory.allStops
+                .filter { stop ->
+                    stop.displayName != nearestStopToVehicle.displayName &&
+                    stop.displayName != destStop.displayName
+                }
+                .map { stop ->
+                    val distFromVehicle = distanceKm(vehicle.latitude, vehicle.longitude, stop.latitude, stop.longitude)
+                    val distToDest = distanceKm(stop.latitude, stop.longitude, destStop.latitude, destStop.longitude)
+                    val totalRouteDist = distanceKm(vehicle.latitude, vehicle.longitude, destStop.latitude, destStop.longitude).coerceAtLeast(0.5)
+                    val detraction = (distFromVehicle + distToDest) - totalRouteDist
+                    Triple(stop, distFromVehicle, detraction)
+                }
+                .filter { it.third <= 8.0 && it.second <= 40.0 }
+                .sortedBy { it.second }
+                .take(3)
+                .map { it.first }
+
+            // 3. Reálná předchozí zastávka za vozem
+            val rad = Math.toRadians((vehicle.bearing + 180.0) % 360.0)
+            val behindLat = vehicle.latitude + cos(rad) * 0.020
+            val behindLon = vehicle.longitude + sin(rad) * 0.030
+            val passedStop = PidStopDirectory.allStops
+                .filter { it.displayName != nearestStopToVehicle.displayName && it.displayName != destStop.displayName }
+                .minByOrNull { distanceKm(behindLat, behindLon, it.latitude, it.longitude) }
+
+            val combined = mutableListOf<PidStop>()
+            if (passedStop != null && distanceKm(vehicle.latitude, vehicle.longitude, passedStop.latitude, passedStop.longitude) <= 15.0) {
+                combined.add(passedStop)
+            }
+            combined.add(nearestStopToVehicle)
+            combined.addAll(stopsAlongCorridor)
+            if (combined.none { it.displayName.equals(destStop.displayName, ignoreCase = true) }) {
+                combined.add(destStop)
+            }
+
+            combined.distinctBy { it.displayName }.map { stop ->
+                Triple(stop.displayName, stop.region, GeoPoint(stop.latitude, stop.longitude))
+            }
         }
     }
 
-    if (route.contains("715")) {
-        val stopsInfo = listOf(
-            Triple("Mnichovo Hradiště,nám.", "pásmo 9", GeoPoint(50.5273, 14.9714)),
-            Triple("Březina", "pásmo 9", GeoPoint(50.5447, 15.0339)),
-            Triple("Loukov,žel.st.", "pásmo 9", GeoPoint(50.5580, 15.0568)),
-            Triple("Žďár,Doubrava", "pásmo 9", GeoPoint(50.5548, 15.0682)),
-            Triple("Žďár,Břehy", "pásmo 9", GeoPoint(50.5437, 15.0610)),
-            Triple("Žďár,Příhrazy", "pásmo 9", GeoPoint(50.5295, 15.0712)),
-            Triple("Žďár,Žehrov", "pásmo 9", GeoPoint(50.5312, 15.0910)),
-            Triple("Žďár,Skokovy", "pásmo 9", GeoPoint(50.5365, 15.1012))
-        )
-        return stopsInfo.mapIndexed { idx, (name, zone, pt) ->
-            val schedStr = String.format("18:%02d", (10 + idx * 5) % 60)
-            val predStr = String.format("18:%02d", (10 + idx * 5 + delayMins) % 60)
-            RouteTimelineStop(name, zone, schedStr, predStr, idx < 2, idx == 2, pt)
-        }
+    // Najdeme zastávku nejblíže aktuální GPS poloze vozu
+    val nearestIndex = rawStops.indices.minByOrNull { idx ->
+        distanceKm(vehicle.latitude, vehicle.longitude, rawStops[idx].third.latitude, rawStops[idx].third.longitude)
+    } ?: 0
+
+    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
+    return rawStops.mapIndexed { idx, (name, zone, pt) ->
+        val diffMinutes = (idx - nearestIndex) * 4
+        val predZdt = now.plusMinutes(diffMinutes.toLong())
+        val schedZdt = predZdt.minusSeconds(vehicle.delaySeconds.toLong())
+
+        val schedStr = schedZdt.format(timeFormatter)
+        val predStr = predZdt.format(timeFormatter)
+        val isPassed = idx < nearestIndex
+        val isCurrentOrNext = idx == nearestIndex
+
+        RouteTimelineStop(name, zone, schedStr, predStr, isPassed, isCurrentOrNext, pt)
     }
-
-    // Výchozí zastávky pro ostatní spoje
-    val pt1 = GeoPoint(vehicle.latitude - 0.02, vehicle.longitude - 0.02)
-    val pt2 = GeoPoint(vehicle.latitude, vehicle.longitude)
-    val pt3 = GeoPoint(vehicle.latitude + 0.03, vehicle.longitude + 0.03)
-
-    return listOf(
-        RouteTimelineStop("Výchozí stanice", "pásmo 7", "18:00", "18:00", true, false, pt1),
-        RouteTimelineStop("Aktuální poloha vozu", "pásmo 8", "18:15", "18:18", false, true, pt2),
-        RouteTimelineStop(vehicle.headsign.ifBlank { "Cílová stanice" }, "pásmo 9", "18:35", "18:38", false, false, pt3)
-    )
 }
 
 @Composable

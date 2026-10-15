@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        cz.pid.golemiocompanion.domain.model.PidStopDirectory.initialize(this)
 
         labPreferencesRepository = LabPreferencesRepository(applicationContext)
         tripViewModel = TripViewModel(
@@ -167,6 +168,19 @@ class MainActivity : ComponentActivity() {
                                             context = this@MainActivity,
                                             forceSelectNearest = false
                                         )
+                                    },
+                                    onTrackVehicle = { line, dest, targetMillis ->
+                                        val intent = Intent(this@MainActivity, DepartureTrackerService::class.java).apply {
+                                            action = DepartureTrackerService.ACTION_START
+                                            putExtra("LINE", line)
+                                            putExtra("DESTINATION", dest)
+                                            putExtra("TARGET_TIME", targetMillis)
+                                        }
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                            ContextCompat.startForegroundService(this@MainActivity, intent)
+                                        } else {
+                                            startService(intent)
+                                        }
                                     }
                                 )
                             }

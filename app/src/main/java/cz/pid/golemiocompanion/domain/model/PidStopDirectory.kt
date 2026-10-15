@@ -1,5 +1,8 @@
 package cz.pid.golemiocompanion.domain.model
 
+import android.content.Context
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.text.Normalizer
 import kotlin.math.*
 
@@ -10,7 +13,13 @@ data class PidStop(
     val latitude: Double,
     val longitude: Double,
     val isTrain: Boolean = false,
-    val alternativeNames: List<String> = emptyList()
+    val alternativeNames: List<String> = emptyList(),
+    val aswNode: String? = null,
+    val cis: String? = null,
+    val municipality: String? = null,
+    val district: String? = null,
+    val trafficType: String? = null,
+    val lines: List<String> = emptyList()
 ) {
     /**
      * Vrací všechny varianty názvu zastávky (s mezerou i bez mezery za čárkou),
@@ -28,168 +37,187 @@ data class PidStop(
 
 object PidStopDirectory {
 
-    val allStops: List<PidStop> = listOf(
-        // =====================================================================
-        // OBEC ŽĎÁR (U MNICHOVA HRADIŠTĚ / TURNOVA) A BEZPROSTŘEDNÍ OKOLÍ
-        // =====================================================================
-        PidStop("Žďár", "Žďár", "Žďár a okolí", 50.5412, 15.0835, false, listOf("Žďár,obec", "Žďár,u kovárny")),
-        PidStop("Žďár, Doubrava", "Žďár,Doubrava", "Žďár a okolí", 50.554882, 15.068209, false, listOf("Žďár, Doubrava", "Doubrava")),
-        PidStop("Žďár, Břehy", "Žďár,Břehy", "Žďár a okolí", 50.5437, 15.0610, false, listOf("Žďár, Břehy, obecní úřad", "Žďár, Břehy", "Břehy")),
-        PidStop("Žďár, Příhrazy", "Žďár,Příhrazy", "Žďár a okolí", 50.5295, 15.0712, false, listOf("Žďár, Příhrazy", "Příhrazy")),
-        PidStop("Žďár, Žehrov", "Žďár,Žehrov", "Žďár a okolí", 50.5312, 15.0910, false, listOf("Žďár, Žehrov", "Žehrov")),
-        PidStop("Žďár, Skokovy", "Žďár,Skokovy", "Žďár a okolí", 50.5365, 15.1012, false, listOf("Žďár, Skokovy", "Skokovy")),
-        PidStop("Loukov u Mn.Hradiště", "Loukov u Mn.Hradiště", "Žďár a okolí", 50.558098, 15.056853, true, listOf("Loukov u Mnichova Hradiště", "Loukov, žel.st.", "Loukov vlak", "ČD Loukov")),
-        PidStop("Loukov, žel.st.", "Loukov,žel.st.", "Žďár a okolí", 50.558098, 15.056853, false, listOf("Loukov, žel. st.", "Loukov u Mn.Hradiště", "Loukov nádraží")),
-        PidStop("Loukov", "Loukov", "Žďár a okolí", 50.5568, 15.0531, false, listOf("Loukov,u hřiště", "Loukov,obec")),
-        PidStop("Loukov, Na Veselici", "Loukov,Na Veselici", "Žďár a okolí", 50.5627, 15.0569, false, listOf("Loukov, Na Veselici", "Na Veselici")),
-        PidStop("Loukov, škola", "Loukov,škola", "Žďár a okolí", 50.5583, 15.0526, false, listOf("Loukov, škola")),
-        PidStop("Loukov, záv.", "Loukov,záv.", "Žďár a okolí", 50.5585, 15.0488),
-        PidStop("Loukovec", "Loukovec", "Žďár a okolí", 50.5472, 15.0258),
-        PidStop("Loukovec, Hubálov", "Loukovec,Hubálov", "Žďár a okolí", 50.5508, 15.0189, false, listOf("Hubálov")),
-        PidStop("Březina u Mn.Hradiště", "Březina u Mn.Hradiště", "Žďár a okolí", 50.5482, 15.0345, isTrain = true, listOf("Březina u Mnichova Hradiště", "Březina", "Březina vlak")),
-        PidStop("Březina", "Březina", "Žďár a okolí", 50.5447, 15.0339, isTrain = false),
-        PidStop("Svijany", "Svijany", "Žďár a okolí", 50.5732, 15.0558, false, listOf("Svijany,pivovar")),
-        PidStop("Svijanský Újezd", "Svijanský Újezd", "Žďár a okolí", 50.5746, 15.0435),
-        PidStop("Příšovice", "Příšovice", "Žďár a okolí", 50.5761, 15.0867, false, listOf("Příšovice,kult.dům")),
-        PidStop("Přepeře", "Přepeře", "Žďár a okolí", 50.5819, 15.1092, false, listOf("Přepeře,samoobsluha")),
-        PidStop("Všeň", "Všeň", "Žďár a okolí", 50.5594, 15.1072, false, listOf("Všeň,škola")),
-        PidStop("Všeň, Ploukonice", "Všeň,Ploukonice", "Žďár a okolí", 50.5661, 15.0989, false, listOf("Ploukonice")),
-        PidStop("Olešnice", "Olešnice", "Žďár a okolí", 50.5419, 15.1189, false, listOf("Olešnice,rozhl.")),
-        PidStop("Kacanovy", "Kacanovy", "Žďár a okolí", 50.5503, 15.1436, false, listOf("Kacanovy,u koupaliště")),
-        PidStop("Vyskeř", "Vyskeř", "Žďár a okolí", 50.5306, 15.1586),
-
-        // =====================================================================
-        // MNICHOVO HRADIŠTĚ A OKOLÍ
-        // =====================================================================
-        PidStop("Mnichovo Hradiště, nám.", "Mnichovo Hradiště,nám.", "Mnichovo Hradiště", 50.5273, 14.9714),
-        PidStop("Mnichovo Hradiště, žel.st.", "Mnichovo Hradiště,žel.st.", "Mnichovo Hradiště", 50.5222, 14.9792, isTrain = true, listOf("Mnichovo Hradiště")),
-        PidStop("Mnichovo Hradiště, Závodí", "Mnichovo Hradiště,Závodí", "Mnichovo Hradiště", 50.5245, 14.9610),
-        PidStop("Mnichovo Hradiště, zdrav.stř.", "Mnichovo Hradiště,zdrav.stř.", "Mnichovo Hradiště", 50.5298, 14.9745),
-        PidStop("Mnichovo Hradiště, Lidická", "Mnichovo Hradiště,Lidická", "Mnichovo Hradiště", 50.5315, 14.9790),
-        PidStop("Mnichovo Hradiště, Dneboh", "Mnichovo Hradiště,Dneboh", "Mnichovo Hradiště", 50.5228, 15.0208, false, listOf("Dneboh")),
-        PidStop("Mnichovo Hradiště, Olšina", "Mnichovo Hradiště,Olšina", "Mnichovo Hradiště", 50.5264, 15.0419, false, listOf("Olšina")),
-        PidStop("Mnichovo Hradiště, Hoškovice", "Mnichovo Hradiště,Hoškovice", "Mnichovo Hradiště", 50.5381, 15.0069, false, listOf("Hoškovice")),
-        PidStop("Mnichovo Hradiště, Lhotice", "Mnichovo Hradiště,Lhotice", "Mnichovo Hradiště", 50.5064, 14.9850, false, listOf("Lhotice")),
-        PidStop("Mnichovo Hradiště, Dobrá Voda", "Mnichovo Hradiště,Dobrá Voda", "Mnichovo Hradiště", 50.5097, 15.0022, false, listOf("Dobrá Voda")),
-        PidStop("Mnichovo Hradiště, Veselá", "Mnichovo Hradiště,Veselá", "Mnichovo Hradiště", 50.5008, 14.9717, false, listOf("Veselá")),
-        PidStop("Mnichovo Hradiště, Hněvousice", "Mnichovo Hradiště,Hněvousice", "Mnichovo Hradiště", 50.5333, 14.9567),
-        PidStop("Mnichovo Hradiště, Podolí", "Mnichovo Hradiště,Podolí", "Mnichovo Hradiště", 50.5489, 14.9839),
-        PidStop("Mnichovo Hradiště, Sychrov", "Mnichovo Hradiště,Sychrov", "Mnichovo Hradiště", 50.5439, 14.9658),
-        PidStop("Klášter Hradiště nad Jizerou", "Klášter Hradiště nad Jizerou", "Mnichovo Hradiště", 50.5256, 14.9469, false, listOf("Klášter Hradiště n.Jiz.")),
-        PidStop("Ptýrov", "Ptýrov", "Mnichovo Hradiště", 50.5117, 14.9608),
-        PidStop("Boseň", "Boseň", "Mnichovo Hradiště", 50.5119, 15.0278),
-        PidStop("Kněžmost", "Kněžmost", "Mnichovo Hradiště", 50.4892, 15.0419, false, listOf("Kněžmost,nám.", "Kněžmost,pošta")),
-        PidStop("Bakov nad Jizerou, nám.", "Bakov nad Jizerou,nám.", "Mnichovo Hradiště", 50.4828, 14.9411),
-        PidStop("Bakov nad Jizerou, žel.st.", "Bakov nad Jizerou,žel.st.", "Mnichovo Hradiště", 50.4789, 14.9297, isTrain = true, listOf("Bakov nad Jizerou", "Bakov nad Jizerou město")),
-        PidStop("Chocnějovice", "Chocnějovice", "Mnichovo Hradiště", 50.5736, 14.9650),
-        PidStop("Mohelnice nad Jizerou", "Mohelnice nad Jizerou", "Mnichovo Hradiště", 50.5625, 14.9742),
-        PidStop("Jivina", "Jivina", "Mnichovo Hradiště", 50.5469, 14.9481),
-
-        // =====================================================================
-        // MLADÁ BOLESLAV A OKOLÍ
-        // =====================================================================
-        PidStop("Mladá Boleslav, aut.st.", "Mladá Boleslav,aut.st.", "Mladá Boleslav", 50.4150, 14.9094),
-        PidStop("Mladá Boleslav, město", "Mladá Boleslav,město", "Mladá Boleslav", 50.4148, 14.9082, isTrain = true, listOf("Mladá Boleslav město")),
-        PidStop("Mladá Boleslav, hl.n.", "Mladá Boleslav,hl.n.", "Mladá Boleslav", 50.4055, 14.8920, isTrain = true, listOf("Mladá Boleslav hl.n.")),
-        PidStop("Mladá Boleslav, Jičínská", "Mladá Boleslav,Jičínská", "Mladá Boleslav", 50.4192, 14.9218),
-        PidStop("Mladá Boleslav, U Sportu", "Mladá Boleslav,U Sportu", "Mladá Boleslav", 50.4225, 14.9126),
-        PidStop("Mladá Boleslav, Klaudiánova nem.", "Mladá Boleslav,Klaudiánova nemocnice", "Mladá Boleslav", 50.4182, 14.9073, false, listOf("Mladá Boleslav,nemocnice")),
-        PidStop("Mladá Boleslav, Václavkova", "Mladá Boleslav,Václavkova", "Mladá Boleslav", 50.4201, 14.9089),
-        PidStop("Mladá Boleslav, Škoda, Hlavní brána", "Mladá Boleslav,Škoda,Hlavní brána", "Mladá Boleslav", 50.4188, 14.9135),
-        PidStop("Mladá Boleslav, Škoda, 6.brána", "Mladá Boleslav,Škoda,6.brána", "Mladá Boleslav", 50.4239, 14.9197),
-        PidStop("Mladá Boleslav, Škoda, 7.brána", "Mladá Boleslav,Škoda,7.brána", "Mladá Boleslav", 50.4272, 14.9248),
-        PidStop("Mladá Boleslav, Česana", "Mladá Boleslav,Česana", "Mladá Boleslav", 50.4098, 14.9195),
-        PidStop("Mladá Boleslav, Zalužanská", "Mladá Boleslav,Zalužanská", "Mladá Boleslav", 50.4142, 14.9265),
-        PidStop("Mladá Boleslav, Na Radouči", "Mladá Boleslav,Na Radouči", "Mladá Boleslav", 50.4258, 14.8995),
-        PidStop("Mladá Boleslav, Rozvoj", "Mladá Boleslav,Rozvoj", "Mladá Boleslav", 50.4285, 14.9062),
-        PidStop("Mladá Boleslav, Olympia", "Mladá Boleslav,Olympia", "Mladá Boleslav", 50.4178, 14.9389),
-        PidStop("Mladá Boleslav, Debř", "Mladá Boleslav,Debř", "Mladá Boleslav", 50.4436, 14.8967, isTrain = true, listOf("Mladá Boleslav-Debř")),
-        PidStop("Mladá Boleslav, Bezděčín", "Mladá Boleslav,Bezděčín", "Mladá Boleslav", 50.3861, 14.8964),
-        PidStop("Mladá Boleslav, Čejetičky", "Mladá Boleslav,Čejetičky", "Mladá Boleslav", 50.4086, 14.8894),
-        PidStop("Kosmonosy, nám.", "Kosmonosy,nám.", "Mladá Boleslav", 50.4397, 14.9258, false, listOf("Kosmonosy")),
-        PidStop("Kosmonosy, Psychiatrická nem.", "Kosmonosy,Psychiatrická nemocnice", "Mladá Boleslav", 50.4375, 14.9231),
-        PidStop("Bradlec", "Bradlec", "Mladá Boleslav", 50.4536, 14.9178, false, listOf("Bradlec,obec")),
-        PidStop("Josefův Důl", "Josefův Důl", "Mladá Boleslav", 50.4472, 14.9006),
-        PidStop("Řepov", "Řepov", "Mladá Boleslav", 50.4067, 14.9606),
-        PidStop("Kolomuty", "Kolomuty", "Mladá Boleslav", 50.4044, 14.9806),
-        PidStop("Plazy", "Plazy", "Mladá Boleslav", 50.4150, 14.9917),
-        PidStop("Březno", "Březno", "Mladá Boleslav", 50.4058, 15.0086, false, listOf("Březno,nám.")),
-        PidStop("Dolní Bousov, nám.", "Dolní Bousov,nám.", "Mladá Boleslav", 50.4392, 15.1269, false, listOf("Dolní Bousov")),
-        PidStop("Dobrovice, nám.", "Dobrovice,nám.", "Mladá Boleslav", 50.3697, 14.9636, false, listOf("Dobrovice,aut.st.")),
-        PidStop("Benátky nad Jizerou, aut.st.", "Benátky nad Jizerou,aut.st.", "Mladá Boleslav", 50.2914, 14.8272),
-
-        // =====================================================================
-        // TURNOV A OKOLÍ
-        // =====================================================================
-        PidStop("Turnov, terminál u žel.st.", "Turnov,terminál u žel.st.", "Turnov", 50.5912, 15.1444, false, listOf("Turnov,aut.nádr.", "Turnov,u žel.st.")),
-        PidStop("Turnov, žel.st.", "Turnov,žel.st.", "Turnov", 50.5915, 15.1438, isTrain = true, listOf("Turnov", "Turnov město")),
-        PidStop("Turnov, nám.", "Turnov,nám.", "Turnov", 50.5873, 15.1568, false, listOf("Turnov,náměstí Českého ráje")),
-        PidStop("Turnov, U masných krámů", "Turnov,U masných krámů", "Turnov", 50.5865, 15.1542),
-        PidStop("Turnov, Sobotecká", "Turnov,Sobotecká", "Turnov", 50.5822, 15.1585),
-        PidStop("Turnov, nemocnice", "Turnov,nemocnice", "Turnov", 50.5828, 15.1489),
-        PidStop("Turnov, Fučíkova", "Turnov,Fučíkova", "Turnov", 50.5901, 15.1482),
-        PidStop("Turnov, Ohrazenice", "Turnov,Ohrazenice", "Turnov", 50.5958, 15.1264, false, listOf("Ohrazenice")),
-        PidStop("Turnov, Mašov", "Turnov,Mašov", "Turnov", 50.5697, 15.1494, false, listOf("Turnov,Mašov,návrší")),
-        PidStop("Turnov, Pelešany", "Turnov,Pelešany", "Turnov", 50.5681, 15.1669),
-        PidStop("Turnov, Daliměřice", "Turnov,Daliměřice", "Turnov", 50.5989, 15.1519),
-        PidStop("Turnov, Hruštice", "Turnov,Hruštice", "Turnov", 50.5928, 15.1714),
-        PidStop("Turnov, Dolánky", "Turnov,Dolánky", "Turnov", 50.6061, 15.1711),
-        PidStop("Karlovice, Sedmihorky", "Karlovice,Sedmihorky", "Turnov", 50.5586, 15.1958, isTrain = true, listOf("Sedmihorky")),
-        PidStop("Hrubá Skála", "Hrubá Skála", "Turnov", 50.5453, 15.1950),
-        PidStop("Rovensko pod Troskami, nám.", "Rovensko pod Troskami,nám.", "Turnov", 50.5364, 15.2589),
-        PidStop("Mírová pod Kozákovem", "Mírová pod Kozákovem", "Turnov", 50.5947, 15.2067),
-        PidStop("Malá Skála", "Malá Skála", "Turnov", 50.6406, 15.1939),
-
-        // =====================================================================
-        // PRAHA (HLAVNÍ PŘESTUPNÍ UZLY PRO LINKY Z MB / MH / TURNOVA)
-        // =====================================================================
-        PidStop("Praha, Černý Most", "Černý Most", "Praha", 50.1092, 14.5772),
-        PidStop("Praha, Hlavní nádraží", "Hlavní nádraží", "Praha", 50.0831, 14.4353, isTrain = true, listOf("Praha hl.n.")),
-        PidStop("Praha, Masarykovo nádraží", "Masarykovo nádraží", "Praha", 50.0878, 14.4331, isTrain = true),
-        PidStop("Praha, Florenc", "Florenc", "Praha", 50.0908, 14.4392),
-        PidStop("Praha, Anděl", "Anděl", "Praha", 50.0715, 14.4036),
-        PidStop("Praha, Smíchovské nádraží", "Smíchovské nádraží", "Praha", 50.0613, 14.4087, isTrain = true),
-        PidStop("Praha, Nádraží Vysočany", "Vysočanská", "Praha", 50.1117, 14.5022, isTrain = true, listOf("Praha-Vysočany")),
-        PidStop("Praha, Letňany", "Letňany", "Praha", 50.1256, 14.5142),
-        PidStop("Praha, Můstek", "Můstek", "Praha", 50.0836, 14.4239),
-        PidStop("Praha, Dejvická", "Dejvická", "Praha", 50.1006, 14.3925)
+    private val defaultStops: List<PidStop> = listOf(
+        PidStop("Žďár, Doubrava", "Žďár,Doubrava", "Žďár (MB)", 50.55488, 15.068211, false, listOf("Žďár, Doubrava", "Doubrava"), aswNode = "6403", cis = "42448", lines = listOf("715")),
+        PidStop("Žďár, Břehy, obecní úřad", "Žďár,Břehy,obecní úřad", "Žďár (MB)", 50.559948, 15.061342, false, listOf("Žďár, Břehy", "Břehy"), aswNode = "6402", lines = listOf("715")),
+        PidStop("Žďár, Příhrazská", "Žďár,Příhrazská", "Žďár (MB)", 50.547077, 15.073006, false, listOf("Žďár, Příhrazy", "Příhrazy"), aswNode = "6404", lines = listOf("715")),
+        PidStop("Žďár, u kostela", "Žďár,u kostela", "Žďár (MB)", 50.543106, 15.084044, false, listOf("Žďár", "u kostela"), aswNode = "6405", lines = listOf("715")),
+        PidStop("Žďár, Žehrov", "Žďár,Žehrov", "Žďár (MB)", 50.53012, 15.100525, false, listOf("Žehrov", "Skokovy"), aswNode = "6406", lines = listOf("715")),
+        PidStop("Loukov u Mnichova Hradiště", "Loukov u Mnichova Hradiště", "Loukov (MB)", 50.55868, 15.056465, true, listOf("Loukov u Mn.Hradiště", "Loukov, žel.st.", "Loukov vlak", "ČD Loukov"), aswNode = "9441", lines = listOf("S35")),
+        PidStop("Loukov, žel.st.", "Loukov,žel.st.", "Loukov (MB)", 50.558075, 15.056908, true, listOf("Loukov, žel. st.", "Loukov nádraží", "Loukov vlak"), aswNode = "9441", lines = listOf("345", "715", "717", "XS35")),
+        PidStop("Loukov, Na Veselici", "Loukov,Na Veselici", "Loukov (MB)", 50.552807, 15.049558, false, listOf("Na Veselici"), aswNode = "6393", lines = listOf("715", "717", "733")),
+        PidStop("Loukov, škola", "Loukov,škola", "Loukov (MB)", 50.560165, 15.035648, false, listOf("Loukov, škola"), aswNode = "6392", lines = listOf("715", "733")),
+        PidStop("Loukovec", "Loukovec", "Loukovec (MB)", 50.562058, 15.015609, false, emptyList(), aswNode = "6390", lines = listOf("715", "733")),
+        PidStop("Loukovec, Hubálov", "Loukovec,Hubálov", "Loukovec (MB)", 50.559105, 15.013259, false, listOf("Hubálov"), aswNode = "6391", lines = listOf("715", "733")),
+        PidStop("Mnichovo Hradiště, nám.", "Mnichovo Hradiště,nám.", "Mnichovo Hradiště (MB)", 50.5224, 14.974665, false, listOf("Mnichovo Hradiště náměstí", "Mnichovo Hradiště"), aswNode = "3253", cis = "21570"),
+        PidStop("Mnichovo Hradiště, žel.st.", "Mnichovo Hradiště,žel.st.", "Mnichovo Hradiště (MB)", 50.526276, 14.975498, true, listOf("Mnichovo Hradiště nádraží", "Mnichovo Hradiště vlak"), aswNode = "9442"),
+        PidStop("Mladá Boleslav, aut.st.", "Mladá Boleslav,aut.st.", "Mladá Boleslav (MB)", 50.419975, 14.916528, false, listOf("Mladá Boleslav autobusové nádraží", "Mladá Boleslav aut.st."), aswNode = "2987", cis = "21373"),
+        PidStop("Mladá Boleslav hl.n.", "Mladá Boleslav hl.n.", "Mladá Boleslav (MB)", 50.4102, 14.8965, true, listOf("Mladá Boleslav hlavní nádraží"), aswNode = "9438"),
+        PidStop("Turnov, Terminál u žel.st.", "Turnov,Terminál u žel.st.", "Turnov (SM)", 50.58701, 15.140575, false, listOf("Turnov terminál", "Turnov nádraží"), aswNode = "9443", cis = "58512"),
+        PidStop("Turnov", "Turnov", "Turnov (SM)", 50.58498, 15.144416, true, listOf("Turnov vlak", "Turnov nádraží"), aswNode = "9443"),
+        PidStop("Praha, Hlavní nádraží", "Hlavní nádraží", "Praha (AB)", 50.0831, 14.4352, true, listOf("Hlavní nádraží", "Praha hl.n.", "Praha, hl.n."), aswNode = "280")
     )
 
-    val quickSelectStops: List<PidStop> = listOf(
-        allStops.first { it.golemioPrimaryName == "Žďár" },
-        allStops.first { it.golemioPrimaryName == "Žďár,Doubrava" },
-        allStops.first { it.golemioPrimaryName == "Loukov" },
-        allStops.first { it.golemioPrimaryName == "Mnichovo Hradiště,nám." },
-        allStops.first { it.golemioPrimaryName == "Mladá Boleslav,aut.st." },
-        allStops.first { it.golemioPrimaryName == "Mladá Boleslav,město" },
-        allStops.first { it.golemioPrimaryName == "Turnov,terminál u žel.st." },
-        allStops.first { it.golemioPrimaryName == "Turnov,nám." },
-        allStops.first { it.golemioPrimaryName == "Černý Most" }
+    @Volatile
+    private var loadedStops: List<PidStop> = defaultStops
+
+    // Před-normalizovaný vyhledávací index pro bleskurychlé hledání
+    private class IndexedStop(
+        val stop: PidStop,
+        val normDisplay: String,
+        val normPrimary: String,
+        val normRegion: String,
+        val normLines: List<String>,
+        val normAlts: List<String>
     )
+
+    @Volatile
+    private var indexedStops: List<IndexedStop> = buildIndexedStops(defaultStops)
+
+    val allStops: List<PidStop>
+        get() = loadedStops
+
+    val quickSelectStops: List<PidStop>
+        get() = listOf(
+            findStopByNameOrNull("Žďár, Doubrava") ?: defaultStops[0],
+            findStopByNameOrNull("Loukov u Mnichova Hradiště") ?: defaultStops[5],
+            findStopByNameOrNull("Loukov, žel.st.") ?: defaultStops[6],
+            findStopByNameOrNull("Žďár, Břehy, obecní úřad") ?: defaultStops[1],
+            findStopByNameOrNull("Mnichovo Hradiště, nám.") ?: defaultStops[11],
+            findStopByNameOrNull("Mladá Boleslav, aut.st.") ?: defaultStops[13],
+            findStopByNameOrNull("Turnov, Terminál u žel.st.") ?: defaultStops[15],
+            findStopByNameOrNull("Hlavní nádraží") ?: defaultStops[17]
+        )
+
+    private fun buildIndexedStops(stops: List<PidStop>): List<IndexedStop> {
+        return stops.map { s ->
+            IndexedStop(
+                stop = s,
+                normDisplay = normalizeText(s.displayName),
+                normPrimary = normalizeText(s.golemioPrimaryName),
+                normRegion = normalizeText(s.region),
+                normLines = s.lines.map { normalizeText(it) },
+                normAlts = s.alternativeNames.map { normalizeText(it) }
+            )
+        }
+    }
+
+    @Synchronized
+    fun initialize(context: Context) {
+        if (loadedStops.size > 100) return // Již načteno
+
+        try {
+            val list = mutableListOf<PidStop>()
+            context.assets.open("pid_stops.tsv").use { inputStream ->
+                BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8)).useLines { lines ->
+                    lines.forEach { line ->
+                        val trimmed = line.trimEnd('\r', '\n')
+                        if (trimmed.isNotBlank()) {
+                            val parts = trimmed.split('\t')
+                            if (parts.size >= 12) {
+                                val dName = parts[0]
+                                val gPrimary = parts[1]
+                                val reg = parts[2]
+                                val lat = parts[3].toDoubleOrNull() ?: 0.0
+                                val lon = parts[4].toDoubleOrNull() ?: 0.0
+                                val isTrain = parts[5] == "1"
+                                val asw = parts[6].takeIf { it.isNotEmpty() }
+                                val cis = parts[7].takeIf { it.isNotEmpty() }
+                                val muni = parts[8].takeIf { it.isNotEmpty() }
+                                val dist = parts[9].takeIf { it.isNotEmpty() }
+                                val tType = parts[10].takeIf { it.isNotEmpty() }
+                                val lns = if (parts[11].isNotEmpty()) parts[11].split(';') else emptyList()
+                                val alts = if (parts.size >= 13 && parts[12].isNotEmpty()) parts[12].split(';') else emptyList()
+
+                                list.add(
+                                    PidStop(
+                                        displayName = dName,
+                                        golemioPrimaryName = gPrimary,
+                                        region = reg,
+                                        latitude = lat,
+                                        longitude = lon,
+                                        isTrain = isTrain,
+                                        alternativeNames = alts,
+                                        aswNode = asw,
+                                        cis = cis,
+                                        municipality = muni,
+                                        district = dist,
+                                        trafficType = tType,
+                                        lines = lns
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (list.isNotEmpty()) {
+                loadedStops = list
+                indexedStops = buildIndexedStops(list)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun findStopByNameOrNull(name: String): PidStop? {
+        val norm = normalizeText(name)
+        return indexedStops.firstOrNull {
+            it.normDisplay == norm || it.normPrimary == norm || it.normAlts.contains(norm)
+        }?.stop
+    }
 
     fun searchStops(query: String): List<PidStop> {
         val cleanQuery = normalizeText(query)
-        if (cleanQuery.isBlank()) return allStops
+        if (cleanQuery.isBlank()) return quickSelectStops
 
-        return allStops.filter { stop ->
-            normalizeText(stop.displayName).contains(cleanQuery) ||
-                normalizeText(stop.golemioPrimaryName).contains(cleanQuery) ||
-                normalizeText(stop.region).contains(cleanQuery) ||
-                stop.alternativeNames.any { normalizeText(it).contains(cleanQuery) }
-        }.sortedWith(
-            compareBy<PidStop> {
-                !normalizeText(it.displayName).startsWith(cleanQuery)
-            }.thenBy { it.displayName }
-        )
+        return indexedStops
+            .mapNotNull { item ->
+                val score = calculateMatchScore(item, cleanQuery)
+                if (score > 0) Pair(item.stop, score) else null
+            }
+            .sortedWith(
+                compareBy<Pair<PidStop, Int>> { -it.second }
+                    .thenBy { it.first.displayName.length }
+                    .thenBy { it.first.displayName }
+            )
+            .map { it.first }
+    }
+
+    private fun calculateMatchScore(item: IndexedStop, q: String): Int {
+        // Přesná shoda
+        if (item.normDisplay == q) return 1000
+        if (item.normPrimary == q) return 900
+        if (item.normAlts.contains(q)) return 800
+
+        // Shoda čísla linky (např. hledání "764", "715", "S3")
+        if (item.normLines.contains(q)) return 700
+
+        // Začíná na hledaný řetězec
+        if (item.normDisplay.startsWith(q)) return 600
+        if (item.normPrimary.startsWith(q)) return 550
+        if (item.normAlts.any { it.startsWith(q) }) return 500
+
+        // Obsahuje hledaný řetězec
+        if (item.normDisplay.contains(q)) return 300
+        if (item.normPrimary.contains(q)) return 250
+        if (item.normAlts.any { it.contains(q) }) return 200
+
+        // Region / obec
+        if (item.normRegion.startsWith(q)) return 150
+        if (item.normRegion.contains(q)) return 100
+
+        return 0
     }
 
     fun findNearestStops(
         userLat: Double,
         userLon: Double,
-        maxRadiusMeters: Int = 15_000,
+        maxRadiusMeters: Int = 20_000,
         limit: Int = 8
     ): List<NearbyStop> {
-        return allStops
+        return loadedStops
             .map { stop ->
                 val dist = calculateDistanceMeters(userLat, userLon, stop.latitude, stop.longitude)
                 NearbyStop(stop = stop, distanceMeters = dist)
@@ -204,11 +232,7 @@ object PidStopDirectory {
     fun findStopOrCreateCustom(queryOrName: String): PidStop {
         val trimmed = queryOrName.trim()
         val norm = normalizeText(trimmed)
-        return allStops.firstOrNull {
-            normalizeText(it.displayName) == norm ||
-                normalizeText(it.golemioPrimaryName) == norm ||
-                it.alternativeNames.any { alt -> normalizeText(alt) == norm }
-        } ?: PidStop(
+        return findStopByNameOrNull(norm) ?: PidStop(
             displayName = trimmed,
             golemioPrimaryName = trimmed,
             region = "Vlastní dotaz",
@@ -217,7 +241,7 @@ object PidStopDirectory {
         )
     }
 
-    private fun normalizeText(input: String): String {
+    fun normalizeText(input: String): String {
         val normalized = Normalizer.normalize(input.lowercase().trim(), Normalizer.Form.NFD)
         return normalized.replace("\\p{InCombiningDiacriticalMarks}+".toRegex(), "")
     }

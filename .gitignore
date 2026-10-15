@@ -10,5 +10,6 @@ app/build/
 /captures
 .externalNativeBuild
 .cxx
+PID_GTFS/
 
 

@@ -166,16 +166,36 @@ fun TripDashboardScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(
-                                    text = "${if (suggestion.isTrain) "🚆" else "🚌"} ${suggestion.displayName}",
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
+                                Column(modifier = Modifier.weight(1f, fill = false)) {
+                                    val icon = when (suggestion.trafficType) {
+                                        "train" -> "🚆"
+                                        "tram" -> "🚊"
+                                        "metroA", "metroB", "metroC", "metroAB", "metroAC", "metroBC" -> "🚇"
+                                        "funicular" -> "🚠"
+                                        "ferry" -> "⛴️"
+                                        else -> if (suggestion.isTrain) "🚆" else "🚌"
+                                    }
+                                    Text(
+                                        text = "$icon ${suggestion.displayName}",
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (suggestion.lines.isNotEmpty()) {
+                                        Text(
+                                            text = "Linky: ${suggestion.lines.take(6).joinToString(", ")}",
+                                            color = Color(0xFF94A3B8),
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
                                 Text(
                                     text = suggestion.region,
                                     color = Color(0xFF38BDF8),
-                                    fontSize = 11.sp
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(start = 8.dp)
                                 )
                             }
                             HorizontalDivider(color = Color(0xFF1E293B), thickness = 0.5.dp)

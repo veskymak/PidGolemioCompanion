@@ -110,6 +110,29 @@ data class ParkingPropertiesDto(
     @SerializedName("total_num_of_places") val totalNumOfPlaces: Int? = 0
 )
 
+data class ParkingV3ResponseDto(
+    @SerializedName("features") val features: List<ParkingV3FeatureDto>? = emptyList()
+)
+
+data class ParkingV3FeatureDto(
+    @SerializedName("geometry") val geometry: GeometryDto? = null,
+    @SerializedName("properties") val properties: ParkingV3PropertiesDto? = null
+)
+
+data class ParkingV3PropertiesDto(
+    @SerializedName("id") val id: String? = null,
+    @SerializedName("name") val name: String? = null,
+    @SerializedName("capacity") val capacity: Int? = 0,
+    @SerializedName("centroid") val centroid: GeometryDto? = null
+)
+
+data class ParkingMeasurementDto(
+    @SerializedName("parking_id") val parkingId: String? = null,
+    @SerializedName("total_spot_number") val totalSpotNumber: Int? = 0,
+    @SerializedName("free_spot_number") val freeSpotNumber: Int? = 0,
+    @SerializedName("occupied_spot_number") val occupiedSpotNumber: Int? = 0
+)
+
 // Shared bikes GeoJSON
 data class SharedBikesGeoJsonDto(
     @SerializedName("features") val features: List<SharedBikeFeatureDto>? = emptyList()

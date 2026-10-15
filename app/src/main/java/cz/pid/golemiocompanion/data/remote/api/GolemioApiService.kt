@@ -18,7 +18,10 @@ interface GolemioApiService {
     suspend fun getDepartureBoard(
         @Header("X-Access-Token") apiKey: String,
         @Header("Cache-Control") cacheControl: String = "no-cache",
-        @Query("names") stopName: String,
+        @Query("names") stopName: String? = null,
+        @Query("aswIds") aswIds: String? = null,
+        @Query("cisIds") cisIds: String? = null,
+        @Query("ids") stopIds: String? = null,
         @Query("minutesBefore") minutesBefore: Int = 0,
         @Query("minutesAfter") minutesAfter: Int = 240,
         @Query("limit") limit: Int = 50,
@@ -36,13 +39,27 @@ interface GolemioApiService {
         @Query("includeNotTracking") includeNotTracking: Boolean = true
     ): VehiclePositionsGeoJsonDto
 
-    @GET("v1/parkings")
+    @GET("v3/parking")
+    suspend fun getParkingLotsV3(
+        @Header("X-Access-Token") apiKey: String,
+        @Query("primarySource") primarySource: String = "tsk-offstreet",
+        @Query("limit") limit: Int = 100
+    ): cz.pid.golemiocompanion.data.remote.dto.ParkingV3ResponseDto
+
+    @GET("v3/parking-measurements")
+    suspend fun getParkingMeasurements(
+        @Header("X-Access-Token") apiKey: String,
+        @Query("primarySource") primarySource: String = "tsk-offstreet",
+        @Query("limit") limit: Int = 100
+    ): List<cz.pid.golemiocompanion.data.remote.dto.ParkingMeasurementDto>
+
+    @GET("v2/parking")
     suspend fun getParkingLots(
         @Header("X-Access-Token") apiKey: String,
         @Query("limit") limit: Int = 100
     ): ParkingLotsGeoJsonDto
 
-    @GET("v1/sharedbikes")
+    @GET("v2/sharedbikes")
     suspend fun getSharedBikes(
         @Header("X-Access-Token") apiKey: String,
         @Query("limit") limit: Int = 150

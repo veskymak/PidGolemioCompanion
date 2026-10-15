@@ -48,23 +48,60 @@ class GolemioRepositoryImpl(
 
     override suspend fun getDeparturesForStop(stop: PidStop): Result<List<DepartureInfo>> {
         return runCatching {
-            val candidateNames = (listOf(stop.golemioPrimaryName, stop.displayName) + stop.getAllQueryNames()).distinct()
             var rawDepartures = emptyList<cz.pid.golemiocompanion.data.remote.dto.DepartureItemDto>()
 
-            for (name in candidateNames) {
-                val res = runCatching {
+            // 1. Přednostně vyzkoušet ASW uzel (např. Loukov uzel 9441 vrátí vlaky i náhradní autobusy XS35):
+            if (!stop.aswNode.isNullOrBlank()) {
+                val aswRes = runCatching {
                     api.getDepartureBoard(
                         apiKey = apiKey,
-                        stopName = name,
+                        aswIds = stop.aswNode,
                         minutesBefore = 0,
                         minutesAfter = 240,
                         limit = 50
                     )
                 }.getOrNull()
 
-                if (!res?.departures.isNullOrEmpty()) {
-                    rawDepartures = res?.departures.orEmpty()
-                    break
+                if (!aswRes?.departures.isNullOrEmpty()) {
+                    rawDepartures = aswRes?.departures.orEmpty()
+                }
+            }
+
+            // 2. Pokud se nic nenašlo podle uzlu, dotázat se podle variant názvu zastávky:
+            if (rawDepartures.isEmpty()) {
+                val candidateNames = (listOf(stop.golemioPrimaryName, stop.displayName) + stop.getAllQueryNames()).distinct()
+                for (name in candidateNames) {
+                    val res = runCatching {
+                        api.getDepartureBoard(
+                            apiKey = apiKey,
+                            stopName = name,
+                            minutesBefore = 0,
+                            minutesAfter = 240,
+                            limit = 50
+                        )
+                    }.getOrNull()
+
+                    if (!res?.departures.isNullOrEmpty()) {
+                        rawDepartures = res?.departures.orEmpty()
+                        break
+                    }
+                }
+            }
+
+            // 3. Záložní dotaz podle CIS stanice (např. pro vlakové stanice s vlastním CIS):
+            if (rawDepartures.isEmpty() && !stop.cis.isNullOrBlank()) {
+                val cisRes = runCatching {
+                    api.getDepartureBoard(
+                        apiKey = apiKey,
+                        cisIds = stop.cis,
+                        minutesBefore = 0,
+                        minutesAfter = 240,
+                        limit = 50
+                    )
+                }.getOrNull()
+
+                if (!cisRes?.departures.isNullOrEmpty()) {
+                    rawDepartures = cisRes?.departures.orEmpty()
                 }
             }
 
@@ -177,6 +214,42 @@ class GolemioRepositoryImpl(
 
     override suspend fun getParkingLots(): Result<List<ParkingLotInfo>> {
         return runCatching {
+            // 1. Přednostně použít Golemio v3 s live měřeními obsazenosti pro P+R (tsk-offstreet):
+            val v3Lots = runCatching {
+                api.getParkingLotsV3(apiKey = apiKey, primarySource = "tsk-offstreet", limit = 100)
+            }.getOrNull()?.features.orEmpty()
+
+            if (v3Lots.isNotEmpty()) {
+                val measurementsMap = runCatching {
+                    api.getParkingMeasurements(apiKey = apiKey, primarySource = "tsk-offstreet", limit = 100)
+                        .associateBy { it.parkingId }
+                }.getOrDefault(emptyMap())
+
+                return@runCatching v3Lots.mapNotNull { feature ->
+                    val props = feature.properties ?: return@mapNotNull null
+                    val coords = props.centroid?.coordinates
+                        ?: feature.geometry?.coordinates
+                        ?: return@mapNotNull null
+
+                    if (coords.size < 2 || (coords[0] == 0.0 && coords[1] == 0.0)) return@mapNotNull null
+
+                    val pId = props.id.orEmpty()
+                    val measurement = measurementsMap[pId]
+                    val free = measurement?.freeSpotNumber ?: 0
+                    val total = measurement?.totalSpotNumber?.takeIf { it > 0 } ?: (props.capacity ?: 0)
+
+                    ParkingLotInfo(
+                        id = pId.ifEmpty { props.name.orEmpty() },
+                        name = props.name ?: "P+R Parkoviště",
+                        latitude = coords[1],
+                        longitude = coords[0],
+                        freeSpaces = free,
+                        totalCapacity = total
+                    )
+                }
+            }
+
+            // 2. Záložní endpoint v2/parking:
             val response = api.getParkingLots(apiKey = apiKey)
             response.features.orEmpty().mapNotNull { feature ->
                 val coords = feature.geometry?.coordinates
@@ -196,8 +269,8 @@ class GolemioRepositoryImpl(
 
     override suspend fun getSharedBikes(): Result<List<SharedBikeInfo>> {
         return runCatching {
-            val response = api.getSharedBikes(apiKey = apiKey)
-            response.features.orEmpty().mapNotNull { feature ->
+            val response = runCatching { api.getSharedBikes(apiKey = apiKey) }.getOrNull()
+            response?.features.orEmpty().mapNotNull { feature ->
                 val coords = feature.geometry?.coordinates
                 if (coords == null || coords.size < 2) return@mapNotNull null
                 val props = feature.properties ?: return@mapNotNull null

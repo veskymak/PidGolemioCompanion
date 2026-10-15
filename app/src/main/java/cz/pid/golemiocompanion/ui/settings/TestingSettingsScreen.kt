@@ -12,6 +12,10 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import android.content.Intent
+import android.provider.Settings
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -29,6 +33,7 @@ fun TestingSettingsScreen(
     repository: LabPreferencesRepository,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var golemioKeyInput by remember(settings.golemioApiKey) {
         mutableStateOf(settings.golemioApiKey)
     }
@@ -286,8 +291,8 @@ fun TestingSettingsScreen(
 
         // Přepínače funkcí
         LabSwitchCard(
-            title = "🏝️ HyperOS Ostrůvek (Dynamic Island)",
-            description = "Při minimalizaci aplikace během sledování spoje automaticky přesune živý odpočet do ostrůvku u průstřelu kamery (přes notifikační Stopky HyperOS).",
+            title = "🔔 Sledování spoje v notifikaci",
+            description = "Při sledování spoje zobrazí v notifikační liště živou notifikaci s odpočtem zbývajícího času do odjezdu v reálném čase.",
             checked = settings.enableIslandNotification,
             onCheckedChange = { repository.setEnableIslandNotification(it) }
         )
