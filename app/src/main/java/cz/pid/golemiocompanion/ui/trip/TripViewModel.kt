@@ -28,6 +28,7 @@ data class TripUiState(
     val searchSuggestions: List<PidStop> = emptyList(),
     val departures: List<DepartureInfo> = emptyList(),
     val trackedDeparture: DepartureInfo? = null,
+    val trackedVehicleTelemetry: VehicleTrackingTelemetry? = null,
     val nearbyStops: List<NearbyStop> = emptyList(),
     val userLatitude: Double? = null,
     val userLongitude: Double? = null,
@@ -108,13 +109,27 @@ class TripViewModel(
         triggeredAlertThresholds.clear()
         _uiState.update { state ->
             val next = if (state.trackedDeparture?.id == departure.id) null else departure
-            state.copy(trackedDeparture = next)
+            val telemetry = if (next != null) {
+                val matching = VehicleTelemetryHelper.findMatchingLiveVehicle(
+                    departure = next,
+                    targetStop = state.selectedStop,
+                    liveVehicles = state.liveVehicles
+                )
+                matching?.let { veh ->
+                    VehicleTelemetryHelper.calculateVehicleTelemetry(
+                        vehicle = veh,
+                        stop = state.selectedStop,
+                        scheduledDepartureEpochMillis = next.exactDepartureEpochMillis
+                    )
+                }
+            } else null
+            state.copy(trackedDeparture = next, trackedVehicleTelemetry = telemetry)
         }
     }
 
     fun clearTrackedDeparture() {
         triggeredAlertThresholds.clear()
-        _uiState.update { it.copy(trackedDeparture = null) }
+        _uiState.update { it.copy(trackedDeparture = null, trackedVehicleTelemetry = null) }
     }
 
     fun setMapRouteFilter(routeFilter: String) {
@@ -250,11 +265,35 @@ class TripViewModel(
                             fresh.firstOrNull {
                                 it.routeShortName == tracked.routeShortName &&
                                     it.scheduledEpochMillis == tracked.scheduledEpochMillis
-                            } ?: tracked.takeIf { it.exactDepartureEpochMillis >= now }
+                            } ?: tracked.takeIf {
+                                val telem = state.trackedVehicleTelemetry
+                                val isLabDistanceEta = labSettings.value.enableDistanceBasedEta
+                                if (isLabDistanceEta && telem != null) {
+                                    !telem.hasDeparted
+                                } else {
+                                    it.exactDepartureEpochMillis >= now
+                                }
+                            }
                         }
+                        val telem = if (updatedTracked != null) {
+                            val matching = VehicleTelemetryHelper.findMatchingLiveVehicle(
+                                departure = updatedTracked,
+                                targetStop = state.selectedStop,
+                                liveVehicles = state.liveVehicles
+                            )
+                            matching?.let { veh ->
+                                VehicleTelemetryHelper.calculateVehicleTelemetry(
+                                    vehicle = veh,
+                                    stop = state.selectedStop,
+                                    scheduledDepartureEpochMillis = updatedTracked.exactDepartureEpochMillis
+                                )
+                            } ?: state.trackedVehicleTelemetry
+                        } else null
+
                         state.copy(
                             departures = fresh,
                             trackedDeparture = updatedTracked,
+                            trackedVehicleTelemetry = telem,
                             isLoading = false,
                             errorMessage = null
                         )
@@ -275,7 +314,23 @@ class TripViewModel(
         viewModelScope.launch {
             val filter = _uiState.value.mapRouteFilter
             repository.getLiveVehicles(filter).onSuccess { vehicles ->
-                _uiState.update { it.copy(liveVehicles = vehicles) }
+                _uiState.update { state ->
+                    val updatedTelemetry = state.trackedDeparture?.let { dep ->
+                        val matching = VehicleTelemetryHelper.findMatchingLiveVehicle(
+                            departure = dep,
+                            targetStop = state.selectedStop,
+                            liveVehicles = vehicles
+                        )
+                        matching?.let { veh ->
+                            VehicleTelemetryHelper.calculateVehicleTelemetry(
+                                vehicle = veh,
+                                stop = state.selectedStop,
+                                scheduledDepartureEpochMillis = dep.exactDepartureEpochMillis
+                            )
+                        }
+                    }
+                    state.copy(liveVehicles = vehicles, trackedVehicleTelemetry = updatedTelemetry)
+                }
             }
             repository.getParkingLots().onSuccess { lots ->
                 _uiState.update { it.copy(parkingLots = lots) }
@@ -299,6 +354,7 @@ class TripViewModel(
     /**
      * Každou sekundu odfiltruje spoje, které právě odjely,
      * aby na obrazovce nikdy nezůstávaly staré spoje s nápisem "< 1 min".
+     * Pokud je aktivní matematické sledování vozidla, odpočet nezmizí, dokud vůz neopustí zastávku.
      */
     private fun startOneSecondCleanupAndAlertsTicker() {
         viewModelScope.launch {
@@ -308,11 +364,18 @@ class TripViewModel(
                     val filtered = state.departures.filter {
                         it.exactDepartureEpochMillis >= now - 5_000L
                     }
-                    val activeTracked = state.trackedDeparture?.takeIf {
-                        it.exactDepartureEpochMillis >= now - 2_000L
+                    val telem = state.trackedVehicleTelemetry
+                    val isLabDistanceEta = labSettings.value.enableDistanceBasedEta
+                    val activeTracked = state.trackedDeparture?.takeIf { dep ->
+                        if (isLabDistanceEta && telem != null) {
+                            !telem.hasDeparted
+                        } else {
+                            dep.exactDepartureEpochMillis >= now - 2_000L
+                        }
                     }
-                    if (filtered.size != state.departures.size || activeTracked != state.trackedDeparture) {
-                        state.copy(departures = filtered, trackedDeparture = activeTracked)
+                    val activeTelem = if (activeTracked == null) null else telem
+                    if (filtered.size != state.departures.size || activeTracked != state.trackedDeparture || activeTelem != state.trackedVehicleTelemetry) {
+                        state.copy(departures = filtered, trackedDeparture = activeTracked, trackedVehicleTelemetry = activeTelem)
                     } else {
                         state
                     }

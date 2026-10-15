@@ -78,7 +78,7 @@ private fun distanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): 
 /**
  * Světlý čistý mapový podklad ve stylu aplikace PID Lítačka (CartoDB Voyager) s licencovaným API klíčem.
  */
-private fun createCartoTileSource(apiKey: String): OnlineTileSourceBase {
+internal fun createCartoTileSource(apiKey: String): OnlineTileSourceBase {
     val effectiveKey = apiKey.trim().ifBlank { "cb1_4ll2_1_f0afdd71b59d8a4f0f10563a" }
     return XYTileSource(
         "CartoVoyagerLitackaLicensed",
@@ -1524,7 +1524,7 @@ private fun RegionJumpChip(
  * - Číslo linky uvnitř
  * - Barevná tečka stavu zpoždění (zelená = včas, oranžová = 1–3 min, červená = > 3 min)
  */
-private fun createLitackaVehicleDrawable(
+internal fun createLitackaVehicleDrawable(
     context: Context,
     routeShortName: String,
     bearing: Float,
@@ -1647,7 +1647,7 @@ private fun createLitackaVehicleDrawable(
  * Vykreslí decentní kulatou ikonu zastávky ve stylu PID Lítačka.
  * Zobrazuje se pouze při velkém přiblížení (zoom >= 14).
  */
-private fun createLitackaStopDrawable(context: Context, isTrain: Boolean): BitmapDrawable {
+internal fun createLitackaStopDrawable(context: Context, isTrain: Boolean): BitmapDrawable {
     val density = context.resources.displayMetrics.density
     val sizePx = (18 * density).roundToInt()
     val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)

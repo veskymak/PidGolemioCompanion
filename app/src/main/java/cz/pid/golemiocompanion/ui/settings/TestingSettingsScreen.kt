@@ -332,6 +332,13 @@ fun TestingSettingsScreen(
             onCheckedChange = { repository.setShowExtendedMapBadges(it) }
         )
 
+        LabSwitchCard(
+            title = "🧪 Matematický odhad dojezdu dle GPS",
+            description = "Vypočítá přesný čas odjezdu matematickým modelem z reálné vzdálenosti autobusu od zastávky na mapě. Odpočet nezmizí, dokud vůz neopustí zastávku.",
+            checked = settings.enableDistanceBasedEta,
+            onCheckedChange = { repository.setEnableDistanceBasedEta(it) }
+        )
+
         // Posuvník poloměru vyhledávání
         Box(
             modifier = Modifier

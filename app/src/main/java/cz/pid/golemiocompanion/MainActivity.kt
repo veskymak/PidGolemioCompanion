@@ -120,6 +120,8 @@ class MainActivity : ComponentActivity() {
                 if (isInPipModeState && uiState.trackedDeparture != null) {
                     ActiveCountdownBanner(
                         departure = uiState.trackedDeparture!!,
+                        telemetry = uiState.trackedVehicleTelemetry,
+                        isLabDistanceEta = labSettings.enableDistanceBasedEta,
                         isPipMode = true,
                         onStopTracking = { tripViewModel.clearTrackedDeparture() }
                     )

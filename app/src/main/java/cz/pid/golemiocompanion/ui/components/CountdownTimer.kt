@@ -18,10 +18,16 @@ import androidx.compose.ui.unit.sp
 import cz.pid.golemiocompanion.domain.model.DepartureInfo
 import kotlinx.coroutines.delay
 
+import androidx.compose.material.icons.filled.Map
+import cz.pid.golemiocompanion.domain.model.VehicleTrackingTelemetry
+
 @Composable
 fun ActiveCountdownBanner(
     departure: DepartureInfo,
+    telemetry: VehicleTrackingTelemetry? = null,
+    isLabDistanceEta: Boolean = true,
     isPipMode: Boolean = false,
+    onOpenLiveMap: (() -> Unit)? = null,
     onStopTracking: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -34,19 +40,33 @@ fun ActiveCountdownBanner(
         }
     }
 
-    // Přesný rozdíl mezi (JŘ + zpoždění Golemio) a aktuálním časem v sekundách
-    val remainingSec = ((departure.exactDepartureEpochMillis - nowMillis) / 1000L).coerceAtLeast(0L)
+    val targetDepartureEpoch = if (isLabDistanceEta && telemetry != null) {
+        telemetry.calculatedDepartureEpochMillis
+    } else {
+        departure.exactDepartureEpochMillis
+    }
+
+    val isAtStop = telemetry?.isAtStop == true
+
+    // Přesný rozdíl v sekundách
+    val remainingSec = ((targetDepartureEpoch - nowMillis) / 1000L).coerceAtLeast(0L)
     val minutes = remainingSec / 60L
     val seconds = remainingSec % 60L
 
-    val formattedCountdown = String.format("%02d:%02d", minutes, seconds)
+    val formattedCountdown = if (isAtStop) {
+        "V ZASTÁVCE"
+    } else {
+        String.format("%02d:%02d", minutes, seconds)
+    }
+
     val urgencyColor = when {
+        isAtStop -> Color(0xFF22C55E) // Zelená - odbavování
         remainingSec <= 60 -> Color(0xFFFF5252)
         remainingSec <= 180 -> Color(0xFFFFB74D)
         else -> Color(0xFF38BDF8)
     }
 
-    val progressTarget = (remainingSec.toFloat() / 900f).coerceIn(0f, 1f)
+    val progressTarget = if (isAtStop) 0.05f else (remainingSec.toFloat() / 900f).coerceIn(0f, 1f)
     val animatedProgress by animateFloatAsState(
         targetValue = progressTarget,
         animationSpec = tween(durationMillis = 250),
@@ -77,12 +97,17 @@ fun ActiveCountdownBanner(
                 Text(
                     text = formattedCountdown,
                     color = urgencyColor,
-                    fontSize = 28.sp,
+                    fontSize = if (isAtStop) 18.sp else 28.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.ExtraBold
                 )
+                val subtext = if (telemetry != null) {
+                    "${telemetry.distanceMeters} m • ${telemetry.speedKmh} km/h • ${formatDelayLabel(telemetry.delaySeconds, true)}"
+                } else {
+                    "JŘ ${departure.scheduledTimeFormatted} (${formatDelayLabel(departure.delaySeconds, departure.isDelayAvailable)})"
+                }
                 Text(
-                    text = "JŘ ${departure.scheduledTimeFormatted} (${formatDelayLabel(departure.delaySeconds, departure.isDelayAvailable)})",
+                    text = subtext,
                     color = Color(0xFF94A3B8),
                     fontSize = 10.sp
                 )
@@ -105,7 +130,7 @@ fun ActiveCountdownBanner(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "AKTIVNÍ ODPOČET (JŘ + GOLEMIO)",
+                        text = if (isLabDistanceEta && telemetry != null) "AKTIVNÍ ODPOČET (🧪 DLE GPS MAPY)" else "AKTIVNÍ ODPOČET (JŘ + GOLEMIO)",
                         color = urgencyColor,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
@@ -117,28 +142,53 @@ fun ActiveCountdownBanner(
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
+                    val detailText = if (telemetry != null) {
+                        "Vzdálenost ${telemetry.distanceMeters} m • Poloha před ${telemetry.pingAgeSeconds} s • ${telemetry.speedKmh} km/h • Zpoždění ${formatDelayLabel(telemetry.delaySeconds, true)}"
+                    } else {
+                        "JŘ ${departure.scheduledTimeFormatted} • Zpoždění ${formatDelayLabel(departure.delaySeconds, departure.isDelayAvailable)} • Odjezd v ${departure.exactDepartureTimeFormatted}"
+                    }
                     Text(
-                        text = "JŘ ${departure.scheduledTimeFormatted} • Zpoždění ${formatDelayLabel(departure.delaySeconds, departure.isDelayAvailable)} • Odjezd v ${departure.exactDepartureTimeFormatted}",
+                        text = detailText,
                         color = Color(0xFF94A3B8),
                         fontSize = 12.sp
                     )
                 }
 
-                Text(
-                    text = formattedCountdown,
-                    color = urgencyColor,
-                    fontSize = 30.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(horizontal = 8.dp)
-                )
-
-                IconButton(onClick = onStopTracking) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Zrušit odpočet",
-                        tint = Color(0xFF94A3B8)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = formattedCountdown,
+                        color = urgencyColor,
+                        fontSize = if (isAtStop) 18.sp else 28.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(horizontal = 6.dp)
                     )
+
+                    if (onOpenLiveMap != null) {
+                        IconButton(
+                            onClick = onOpenLiveMap,
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = Color(0xFF0284C7).copy(alpha = 0.25f)
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Map,
+                                contentDescription = "Zobrazit vůz na mapě",
+                                tint = Color(0xFF38BDF8)
+                            )
+                        }
+                    }
+
+                    IconButton(onClick = onStopTracking) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Zrušit odpočet",
+                            tint = Color(0xFF94A3B8)
+                        )
+                    }
                 }
             }
 

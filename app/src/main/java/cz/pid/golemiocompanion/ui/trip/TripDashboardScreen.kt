@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import cz.pid.golemiocompanion.data.local.LabSettings
 import cz.pid.golemiocompanion.domain.model.*
 import cz.pid.golemiocompanion.ui.components.ActiveCountdownBanner
+import cz.pid.golemiocompanion.ui.components.TrackedVehicleMapDialog
 import cz.pid.golemiocompanion.ui.components.formatDelayLabel
 import cz.pid.golemiocompanion.ui.components.liquidGlassCard
 import kotlinx.coroutines.delay
@@ -54,6 +55,13 @@ fun TripDashboardScreen(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var showTrackedVehicleMap by remember { mutableStateOf(false) }
+
+    LaunchedEffect(uiState.trackedDeparture?.id) {
+        if (uiState.trackedDeparture == null) {
+            showTrackedVehicleMap = false
+        }
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -278,10 +286,25 @@ fun TripDashboardScreen(
         uiState.trackedDeparture?.let { tracked ->
             ActiveCountdownBanner(
                 departure = tracked,
+                telemetry = uiState.trackedVehicleTelemetry,
+                isLabDistanceEta = labSettings.enableDistanceBasedEta,
                 isPipMode = false,
+                onOpenLiveMap = { showTrackedVehicleMap = true },
                 onStopTracking = onClearTrackedDeparture
             )
             Spacer(modifier = Modifier.height(10.dp))
+        }
+
+        // Dialog se živou mapou vozu a cílové zastávky s Lítačka telemetrií
+        if (showTrackedVehicleMap && uiState.trackedDeparture != null) {
+            TrackedVehicleMapDialog(
+                departure = uiState.trackedDeparture!!,
+                stop = uiState.selectedStop,
+                telemetry = uiState.trackedVehicleTelemetry,
+                cartoApiKey = labSettings.cartoApiKey,
+                isLabDistanceEta = labSettings.enableDistanceBasedEta,
+                onDismissRequest = { showTrackedVehicleMap = false }
+            )
         }
 
         // Hlavička odjezdové tabule
