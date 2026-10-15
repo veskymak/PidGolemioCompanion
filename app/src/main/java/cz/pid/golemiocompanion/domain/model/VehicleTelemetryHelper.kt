@@ -13,7 +13,9 @@ data class VehicleTrackingTelemetry(
     val hasDeparted: Boolean,
     val estimatedArrivalSeconds: Int,
     val calculatedDepartureEpochMillis: Long,
-    val formattedStatus: String
+    val formattedStatus: String,
+    val isGpsCorrectionActive: Boolean = false,
+    val correctionSeconds: Int = 0
 )
 
 object VehicleTelemetryHelper {
@@ -100,13 +102,41 @@ object VehicleTelemetryHelper {
             else -> 7.0 // ~25 km/h výchozí městský/regionální průměr pro popojíždění
         }
 
-        // Matematický odhad dojezdu podle reálné vzdálenosti na mapě
+        // 1. Oficiální základ z PID (JŘ + nahlášené zpoždění Golemio)
+        // Pokud je oficiální čas již v minulosti, ale vůz ještě nedorazil, jako základ bereme nowMillis.
+        val officialBaseEpochMillis = if (scheduledDepartureEpochMillis < nowMillis) {
+            nowMillis
+        } else {
+            scheduledDepartureEpochMillis
+        }
+
+        // 2. Fyzikální model dojezdu (reálná vzdálenost z GPS na mapě a efektivní rychlost)
         val travelSeconds = if (isAtStop) 0 else (distanceMeters / effectiveSpeedMps).roundToInt()
         val dwellSeconds = if (isAtStop) 15 else 20
-        val estimatedArrivalSeconds = travelSeconds + dwellSeconds
+        val physicalEstimatedArrivalSeconds = travelSeconds + dwellSeconds
+        val physicalEpochMillis = nowMillis + (physicalEstimatedArrivalSeconds * 1000L)
 
-        // Dynamický čas odjezdu na základě reálné vzdálenosti (overlaye mapy)
-        val calculatedDepartureEpochMillis = nowMillis + (estimatedArrivalSeconds * 1000L)
+        // 3. Pravidlo:
+        // - Matematický odhad dojezdu se aktivuje POUZE, pokud je vůz méně než 700 metrů od zastávky.
+        // - Maximální čas, který může do odpočtu přidat nebo odebrat, je ±30 sekund oproti oficiálním předpokladům PID.
+        // - Pokud je vůz v zastávce (isAtStop), odpočet držíme živý pro odbavování.
+        val (finalDepartureEpochMillis, isGpsCorrectionActive, correctionSeconds) = when {
+            isAtStop -> {
+                Triple(kotlin.math.max(nowMillis + 15_000L, officialBaseEpochMillis), true, 0)
+            }
+            distanceMeters < 700 -> {
+                val diffSeconds = ((physicalEpochMillis - officialBaseEpochMillis) / 1000L).toInt()
+                val clampedCorrectionSec = diffSeconds.coerceIn(-30, 30)
+                val adjustedEpoch = officialBaseEpochMillis + (clampedCorrectionSec * 1000L)
+                Triple(adjustedEpoch, true, clampedCorrectionSec)
+            }
+            else -> {
+                // 700 m a více: zachováváme 100% oficiální předpoklad PID bez GPS korekce
+                Triple(officialBaseEpochMillis, false, 0)
+            }
+        }
+
+        val estimatedArrivalSeconds = ((finalDepartureEpochMillis - nowMillis) / 1000L).coerceAtLeast(0L).toInt()
 
         // Zjistíme, zda vůz směřuje k zastávce nebo se od ní vzdaluje
         val headingTowardsStop = isHeadingTowardsStop(
@@ -127,8 +157,15 @@ object VehicleTelemetryHelper {
 
         val formattedStatus = when {
             isAtStop -> "🟢 Vůz právě v zastávce (odbavování)"
-            distanceMeters <= 350 -> "🟡 Vůz přijíždí do zastávky (${distanceMeters} m)"
-            else -> "🔵 Vůz se blíží (${distanceMeters} m, ${speed} km/h)"
+            distanceMeters < 700 -> {
+                val corrLabel = when {
+                    correctionSeconds > 0 -> "+${correctionSeconds}s"
+                    correctionSeconds < 0 -> "${correctionSeconds}s"
+                    else -> "v souladu s PID"
+                }
+                "🟡 Vůz přijíždí (${distanceMeters} m • GPS $corrLabel)"
+            }
+            else -> "🔵 Vůz se blíží (${distanceMeters} m • dle PID)"
         }
 
         return VehicleTrackingTelemetry(
@@ -140,8 +177,10 @@ object VehicleTelemetryHelper {
             isAtStop = isAtStop,
             hasDeparted = hasDeparted,
             estimatedArrivalSeconds = estimatedArrivalSeconds,
-            calculatedDepartureEpochMillis = calculatedDepartureEpochMillis,
-            formattedStatus = formattedStatus
+            calculatedDepartureEpochMillis = finalDepartureEpochMillis,
+            formattedStatus = formattedStatus,
+            isGpsCorrectionActive = isGpsCorrectionActive,
+            correctionSeconds = correctionSeconds
         )
     }
 }

@@ -4,21 +4,14 @@ import android.content.Context
 import android.graphics.Color as AndroidColor
 import android.graphics.Paint
 import android.view.ViewGroup
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.Update
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -69,81 +63,104 @@ fun TrackedVehicleMapDialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        // Pozadí se ztmavením (kliknutí mimo okno zavře mapu)
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF0F172A).copy(alpha = 0.96f))
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(12.dp)
+                .background(Color.Black.copy(alpha = 0.55f))
+                .clickable(onClick = onDismissRequest),
+            contentAlignment = Alignment.BottomCenter
         ) {
+            // Plovoucí okno v dolní části displeje – maximálně 50 % výšky obrazovky
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xFF1E293B))
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.50f)
+                    .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                    .background(Color(0xFF0F172A))
+                    .clickable(enabled = false, onClick = {}) // Zamezí zavření při kliknutí dovnitř
+                    .navigationBarsPadding()
             ) {
-                // Hlavička dialogu
+                // Lišta s táhlem pro přehlednost
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp, bottom = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(36.dp)
+                            .height(4.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF475569))
+                    )
+                }
+
+                // Kompaktní hlavička okna
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF0F172A))
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                        .padding(horizontal = 14.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.weight(1f)
                     ) {
                         Surface(
                             color = Color(0xFF0284C7),
-                            shape = RoundedCornerShape(10.dp)
+                            shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
                                 text = departure.routeShortName,
                                 color = Color.White,
-                                fontSize = 16.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                             )
                         }
 
                         Column {
                             Text(
-                                text = "Živá poloha vozu PID",
-                                color = Color(0xFF38BDF8),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
+                                text = "Linka ${departure.routeShortName} → ${departure.headsign}",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "Směr ${departure.headsign}",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                                text = "Zastávka: ${stop.displayName}",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
 
                     IconButton(
                         onClick = onDismissRequest,
+                        modifier = Modifier.size(32.dp),
                         colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0xFF334155))
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Zavřít",
-                            tint = Color.White
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }
 
-                // Interaktivní mapa osmdroid
+                // Interaktivní mapa osmdroid (vyplňuje prostor mezi hlavičkou a telemetrií)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1.3f)
+                        .weight(1f)
                 ) {
                     AndroidView(
                         factory = { ctx ->
@@ -230,190 +247,110 @@ fun TrackedVehicleMapDialog(
                             val mv = mapViewInstance ?: return@IconButton
                             val veh = telemetry?.vehicle
                             if (veh != null) {
-                                val minLat = min(veh.latitude, stop.latitude) - 0.0012
-                                val maxLat = max(veh.latitude, stop.latitude) + 0.0012
-                                val minLon = min(veh.longitude, stop.longitude) - 0.0015
-                                val maxLon = max(veh.longitude, stop.longitude) + 0.0015
+                                val minLat = min(veh.latitude, stop.latitude) - 0.0010
+                                val maxLat = max(veh.latitude, stop.latitude) + 0.0010
+                                val minLon = min(veh.longitude, stop.longitude) - 0.0012
+                                val maxLon = max(veh.longitude, stop.longitude) + 0.0012
                                 mv.zoomToBoundingBox(BoundingBox(maxLat, maxLon, minLat, minLon), true)
                             } else {
-                                mv.controller.animateTo(GeoPoint(stop.latitude, stop.longitude), 16.5, 500L)
+                                mv.controller.animateTo(GeoPoint(stop.latitude, stop.longitude), 16.5, 400L)
                             }
                         },
                         colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0xFF0284C7)),
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(14.dp)
-                            .size(46.dp)
+                            .padding(10.dp)
+                            .size(38.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.MyLocation,
                             contentDescription = "Vycentrovat na vůz a zastávku",
-                            tint = Color.White
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
 
-                // Spodní telemetrický panel (styl PID Lítačka)
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .background(Color(0xFF0F172A))
-                        .padding(16.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                // Kompaktní telemetrický proužek pod mapou (styl PID Lítačka)
+                Surface(
+                    color = Color(0xFF1E293B),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    if (telemetry != null) {
-                        // Karta stavu vozu
-                        Surface(
-                            color = Color(0xFF1E293B),
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (telemetry != null) {
+                            // 4 mini ukazatele v jedné řadě
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                TelemetryCompactPill(
+                                    title = "Zpoždění",
+                                    value = formatDelayLabel(telemetry.delaySeconds, true),
+                                    valueColor = when {
+                                        telemetry.delaySeconds <= 60 -> Color(0xFF4ADE80)
+                                        telemetry.delaySeconds <= 180 -> Color(0xFFFBBF24)
+                                        else -> Color(0xFFF87171)
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                TelemetryCompactPill(
+                                    title = "Poloha před",
+                                    value = "${telemetry.pingAgeSeconds}s",
+                                    valueColor = Color(0xFF38BDF8),
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                TelemetryCompactPill(
+                                    title = "Vzdálenost",
+                                    value = "${telemetry.distanceMeters} m",
+                                    valueColor = Color.White,
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                TelemetryCompactPill(
+                                    title = "Rychlost",
+                                    value = "${telemetry.speedKmh} km/h",
+                                    valueColor = Color.White,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            // Stavový řádek s informací o odjezdu a aplikované korekci
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
                                 Text(
                                     text = telemetry.formattedStatus,
                                     color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
                                 )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Cílová zastávka: ${stop.displayName}",
-                                    color = Color(0xFF94A3B8),
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
 
-                        // Mřížka 4 telemetrických ukazatelů
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            TelemetryMiniStat(
-                                title = "Zpoždění",
-                                value = formatDelayLabel(telemetry.delaySeconds, true),
-                                valueColor = when {
-                                    telemetry.delaySeconds <= 60 -> Color(0xFF4ADE80)
-                                    telemetry.delaySeconds <= 180 -> Color(0xFFFBBF24)
-                                    else -> Color(0xFFF87171)
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            TelemetryMiniStat(
-                                title = "Poloha před",
-                                value = "${telemetry.pingAgeSeconds} s",
-                                valueColor = Color(0xFF38BDF8),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            TelemetryMiniStat(
-                                title = "Vzdálenost",
-                                value = "${telemetry.distanceMeters} m",
-                                valueColor = Color.White,
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            TelemetryMiniStat(
-                                title = "Rychlost",
-                                value = "${telemetry.speedKmh} km/h",
-                                valueColor = Color.White,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        // Matematický odhad dojezdu dle GPS
-                        Surface(
-                            color = Color(0xFF0369A1).copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(14.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.4f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = "🧪 Matematický odpočet z mapy",
-                                        color = Color(0xFF38BDF8),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    if (isLabDistanceEta) {
-                                        Surface(
-                                            color = Color(0xFF16A34A).copy(alpha = 0.3f),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            Text(
-                                                text = "Aktivní",
-                                                color = Color(0xFF4ADE80),
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(4.dp))
                                 val estTimeFormatted = formatTimeFromEpoch(telemetry.calculatedDepartureEpochMillis)
-                                val estMinutes = telemetry.estimatedArrivalSeconds / 60
-                                val estSeconds = telemetry.estimatedArrivalSeconds % 60
-                                val etaLabel = if (telemetry.isAtStop) {
-                                    "Právě odbavuje v zastávce"
-                                } else {
-                                    "Odjezd v $estTimeFormatted (za ${estMinutes} min ${estSeconds} s)"
-                                }
-
                                 Text(
-                                    text = etaLabel,
-                                    color = Color.White,
-                                    fontSize = 14.sp,
+                                    text = "Odjezd v $estTimeFormatted",
+                                    color = Color(0xFF38BDF8),
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontFamily = FontFamily.Monospace
                                 )
-
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Odpočet nezmizí, dokud autobus neopustí zastávku.",
-                                    color = Color(0xFF94A3B8),
-                                    fontSize = 11.sp
-                                )
                             }
-                        }
-                    } else {
-                        // Čekání na polohu
-                        Surface(
-                            color = Color(0xFF1E293B),
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(16.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text(
-                                    text = "📡 Čekám na první GPS polohu vozu…",
-                                    color = Color(0xFFFBBF24),
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "Z palubního počítače vozu ještě nedorazil poziční ping pro tento spoj. Na mapě je zobrazena poloha cílové zastávky ${stop.displayName}.",
-                                    color = Color(0xFF94A3B8),
-                                    fontSize = 12.sp,
-                                    lineHeight = 16.sp
-                                )
-                            }
+                        } else {
+                            Text(
+                                text = "📡 Čekám na poziční GPS ping z palubního počítače vozu PID…",
+                                color = Color(0xFFFBBF24),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -423,32 +360,34 @@ fun TrackedVehicleMapDialog(
 }
 
 @Composable
-private fun TelemetryMiniStat(
+private fun TelemetryCompactPill(
     title: String,
     value: String,
     valueColor: Color,
     modifier: Modifier = Modifier
 ) {
     Surface(
-        color = Color(0xFF1E293B),
-        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF0F172A),
+        shape = RoundedCornerShape(8.dp),
         modifier = modifier
     ) {
         Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.Center
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 text = title,
                 color = Color(0xFF94A3B8),
-                fontSize = 11.sp
+                fontSize = 9.sp,
+                maxLines = 1
             )
-            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = value,
                 color = valueColor,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
             )
         }
     }
@@ -459,4 +398,3 @@ private fun formatTimeFromEpoch(epochMillis: Long): String {
         .atZone(ZoneId.of("Europe/Prague"))
         .format(DateTimeFormatter.ofPattern("HH:mm:ss"))
 }
-

@@ -334,7 +334,7 @@ fun TestingSettingsScreen(
 
         LabSwitchCard(
             title = "🧪 Matematický odhad dojezdu dle GPS",
-            description = "Vypočítá přesný čas odjezdu matematickým modelem z reálné vzdálenosti autobusu od zastávky na mapě. Odpočet nezmizí, dokud vůz neopustí zastávku.",
+            description = "Aktivuje se do 700 m od zastávky. Koriguje čas odjezdu (max ±30 s) podle reálné GPS vzdálenosti na mapě a drží odpočet aktivní, dokud vůz neopustí zastávku.",
             checked = settings.enableDistanceBasedEta,
             onCheckedChange = { repository.setEnableDistanceBasedEta(it) }
         )
