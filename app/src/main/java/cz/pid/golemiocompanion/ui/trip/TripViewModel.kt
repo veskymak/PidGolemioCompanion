@@ -60,6 +60,17 @@ class TripViewModel(
         startDeparturesPolling()
         startOneSecondCleanupAndAlertsTicker()
         startLiveMapPolling()
+
+        viewModelScope.launch {
+            labPreferencesRepository.settings
+                .map { it.golemioApiKey }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect {
+                    refreshDeparturesNow()
+                    refreshLiveVehiclesNow()
+                }
+        }
     }
 
     fun onSearchQueryChanged(query: String) {

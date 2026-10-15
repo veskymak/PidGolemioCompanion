@@ -18,6 +18,7 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 
 class GolemioRepositoryImpl(
+    private val apiKeyProvider: (() -> String)? = null,
     private val customApiKey: String? = null
 ) : GolemioRepository {
 
@@ -26,7 +27,8 @@ class GolemioRepositoryImpl(
     private val hmsFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
 
     private val apiKey: String
-        get() = customApiKey?.takeIf { it.isNotBlank() }
+        get() = apiKeyProvider?.invoke()?.trim()?.takeIf { it.isNotBlank() }
+            ?: customApiKey?.takeIf { it.isNotBlank() }
             ?: runCatching { BuildConfig.GOLEMIO_API_KEY }.getOrNull()?.takeIf { it.isNotBlank() }
             ?: DEFAULT_FALLBACK_KEY
 

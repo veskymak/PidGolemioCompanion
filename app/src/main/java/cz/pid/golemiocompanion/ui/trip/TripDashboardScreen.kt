@@ -75,9 +75,10 @@ fun TripDashboardScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFF0B0F19))
+            .statusBarsPadding()
             .padding(horizontal = 14.dp)
     ) {
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         // Vyhledávač a našeptávač zastávek (MB, MH, Žďár, Doubrava, Loukov, Turnov, Praha)
         Box(
@@ -317,16 +318,28 @@ fun TripDashboardScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 32.dp)
-                    .liquidGlassCard()
+                    .padding(top = 24.dp)
+                    .liquidGlassCard(cornerRadius = 18.dp)
                     .padding(20.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = uiState.errorMessage,
-                    color = Color(0xFFF87171),
-                    fontSize = 14.sp
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = uiState.errorMessage,
+                        color = Color(0xFFF87171),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    if (uiState.errorMessage.contains("401") || labSettings.golemioApiKey.isBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "ℹ️ Vložte prosím svůj Golemio API klíč v záložce Laboratoř pro načítání reálných dat.",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 12.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
             }
         } else if (activeDepartures.isEmpty()) {
             Box(

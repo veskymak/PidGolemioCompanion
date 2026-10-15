@@ -3,9 +3,15 @@ package cz.pid.golemiocompanion.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -23,26 +29,262 @@ fun TestingSettingsScreen(
     repository: LabPreferencesRepository,
     modifier: Modifier = Modifier
 ) {
+    var golemioKeyInput by remember(settings.golemioApiKey) {
+        mutableStateOf(settings.golemioApiKey)
+    }
+    var cartoKeyInput by remember(settings.cartoApiKey) {
+        mutableStateOf(settings.cartoApiKey)
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFF0B0F19))
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text(
-            text = "Laboratoř funkcí",
-            color = Color.White,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.ExtraBold
-        )
-        Text(
-            text = "Všechny přepínače níže jsou plně funkční a okamžitě ovlivňují chování odpočtu, GPS a mapy.",
-            color = Color(0xFF94A3B8),
-            fontSize = 13.sp
-        )
+        // Hlavička obrazovky
+        Column(modifier = Modifier.padding(bottom = 4.dp)) {
+            Text(
+                text = "Laboratoř funkcí & API",
+                color = Color.White,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Nastavení klíčů Golemio, CARTO map a přepínače chování odpočtu a GPS.",
+                color = Color(0xFF94A3B8),
+                fontSize = 13.sp
+            )
+        }
 
+        // Karta: Golemio API klíč
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .liquidGlassCard(cornerRadius = 20.dp, borderAlpha = 0.22f)
+                .padding(16.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Key,
+                            contentDescription = null,
+                            tint = Color(0xFF38BDF8),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "Golemio API klíč",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    if (settings.golemioApiKey.isNotBlank()) {
+                        Surface(
+                            color = Color(0xFF16A34A).copy(alpha = 0.25f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFF4ADE80),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Aktivní",
+                                    color = Color(0xFF4ADE80),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    } else {
+                        Surface(
+                            color = Color(0xFFDC2626).copy(alpha = 0.25f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = Color(0xFFF87171),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Chybí klíč (HTTP 401)",
+                                    color = Color(0xFFF87171),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Text(
+                    text = "Potřebný pro stahování reálných odjezdů a zpoždění z api.golemio.cz. Klíč získáte zdarma na golemio.cz po registraci.",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 12.sp
+                )
+
+                OutlinedTextField(
+                    value = golemioKeyInput,
+                    onValueChange = {
+                        golemioKeyInput = it
+                        repository.setGolemioApiKey(it)
+                    },
+                    placeholder = {
+                        Text(
+                            "Vložte Golemio API klíč…",
+                            color = Color(0xFF64748B),
+                            fontSize = 13.sp
+                        )
+                    },
+                    trailingIcon = {
+                        if (golemioKeyInput.isNotEmpty()) {
+                            IconButton(onClick = {
+                                golemioKeyInput = ""
+                                repository.setGolemioApiKey("")
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.Clear,
+                                    contentDescription = "Vymazat",
+                                    tint = Color(0xFF94A3B8)
+                                )
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF38BDF8),
+                        unfocusedBorderColor = Color(0xFF334155),
+                        focusedContainerColor = Color(0xFF0F172A),
+                        unfocusedContainerColor = Color(0xFF0F172A)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        // Karta: CARTO Basemaps API klíč
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .liquidGlassCard(cornerRadius = 20.dp, borderAlpha = 0.22f)
+                .padding(16.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Key,
+                            contentDescription = null,
+                            tint = Color(0xFFA855F7),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "CARTO Basemaps API klíč",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Surface(
+                        color = Color(0xFF9333EA).copy(alpha = 0.25f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = "Bez vodoznaku",
+                            color = Color(0xFFD8B4FE),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Odstraňuje vodoznak 'API KEY REQUIRED' z mapových podkladů Carto Voyager (PID Lítačka styl).",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 12.sp
+                )
+
+                OutlinedTextField(
+                    value = cartoKeyInput,
+                    onValueChange = {
+                        cartoKeyInput = it
+                        repository.setCartoApiKey(it)
+                    },
+                    placeholder = {
+                        Text(
+                            "Vložte CARTO API klíč…",
+                            color = Color(0xFF64748B),
+                            fontSize = 13.sp
+                        )
+                    },
+                    trailingIcon = {
+                        if (cartoKeyInput.isNotEmpty() && cartoKeyInput != LabPreferencesRepository.DEFAULT_CARTO_KEY) {
+                            IconButton(onClick = {
+                                cartoKeyInput = LabPreferencesRepository.DEFAULT_CARTO_KEY
+                                repository.setCartoApiKey(LabPreferencesRepository.DEFAULT_CARTO_KEY)
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.Clear,
+                                    contentDescription = "Reset na výchozí",
+                                    tint = Color(0xFF94A3B8)
+                                )
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFFA855F7),
+                        unfocusedBorderColor = Color(0xFF334155),
+                        focusedContainerColor = Color(0xFF0F172A),
+                        unfocusedContainerColor = Color(0xFF0F172A)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        // Přepínače funkcí
         LabSwitchCard(
             title = "PiP (Obraz v obraze) plovoucí odpočet",
             description = "Při minimalizaci aplikace během aktivního sledování spoje přepne odpočet do plovoucího okna.",
@@ -78,6 +320,7 @@ fun TestingSettingsScreen(
             onCheckedChange = { repository.setShowExtendedMapBadges(it) }
         )
 
+        // Posuvník poloměru vyhledávání
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -110,7 +353,8 @@ fun TestingSettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(100.dp))
+        // Rezerva pro spodní plovoucí navbar
+        Spacer(modifier = Modifier.height(120.dp))
     }
 }
 

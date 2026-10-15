@@ -2,11 +2,14 @@ package cz.pid.golemiocompanion.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import cz.pid.golemiocompanion.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 data class LabSettings(
+    val golemioApiKey: String = "",
+    val cartoApiKey: String = "cb1_4ll2_1_f0afdd71b59d8a4f0f10563a",
     val enablePipCountdown: Boolean = true,
     val enableSmartDepartureAlerts: Boolean = true,
     val showExactSecondsInBoard: Boolean = false,
@@ -24,7 +27,13 @@ class LabPreferencesRepository(context: Context) {
     val settings: StateFlow<LabSettings> = _settings.asStateFlow()
 
     private fun loadSettings(): LabSettings {
+        val buildConfigKey = runCatching { BuildConfig.GOLEMIO_API_KEY }.getOrNull().orEmpty()
+        val savedGolemioKey = prefs.getString(KEY_GOLEMIO_API_KEY, null)
+        val resolvedGolemioKey = savedGolemioKey ?: buildConfigKey
+
         return LabSettings(
+            golemioApiKey = resolvedGolemioKey,
+            cartoApiKey = prefs.getString(KEY_CARTO_API_KEY, DEFAULT_CARTO_KEY) ?: DEFAULT_CARTO_KEY,
             enablePipCountdown = prefs.getBoolean(KEY_PIP_COUNTDOWN, true),
             enableSmartDepartureAlerts = prefs.getBoolean(KEY_SMART_ALERTS, true),
             showExactSecondsInBoard = prefs.getBoolean(KEY_EXACT_SECONDS_BOARD, false),
@@ -32,6 +41,16 @@ class LabPreferencesRepository(context: Context) {
             showExtendedMapBadges = prefs.getBoolean(KEY_EXTENDED_MAP_BADGES, false),
             nearbyRadiusKm = prefs.getInt(KEY_NEARBY_RADIUS_KM, 10)
         )
+    }
+
+    fun setGolemioApiKey(apiKey: String) {
+        prefs.edit().putString(KEY_GOLEMIO_API_KEY, apiKey.trim()).apply()
+        _settings.value = loadSettings()
+    }
+
+    fun setCartoApiKey(apiKey: String) {
+        prefs.edit().putString(KEY_CARTO_API_KEY, apiKey.trim()).apply()
+        _settings.value = loadSettings()
     }
 
     fun setEnablePipCountdown(enabled: Boolean) {
@@ -65,6 +84,9 @@ class LabPreferencesRepository(context: Context) {
     }
 
     companion object {
+        const val DEFAULT_CARTO_KEY = "cb1_4ll2_1_f0afdd71b59d8a4f0f10563a"
+        private const val KEY_GOLEMIO_API_KEY = "golemio_api_key"
+        private const val KEY_CARTO_API_KEY = "carto_api_key"
         private const val KEY_PIP_COUNTDOWN = "enable_pip_countdown"
         private const val KEY_SMART_ALERTS = "enable_smart_alerts"
         private const val KEY_EXACT_SECONDS_BOARD = "show_exact_seconds_board"

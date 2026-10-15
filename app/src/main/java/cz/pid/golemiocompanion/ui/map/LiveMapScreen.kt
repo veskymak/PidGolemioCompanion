@@ -44,22 +44,25 @@ import org.osmdroid.views.overlay.Marker
 import kotlin.math.roundToInt
 
 /**
- * Světlý čistý mapový podklad ve stylu aplikace PID Lítačka (CartoDB Voyager).
- * Nevyžaduje žádný Google API klíč a funguje okamžitě.
+ * Světlý čistý mapový podklad ve stylu aplikace PID Lítačka (CartoDB Voyager) s licencovaným API klíčem.
  */
-private val LITACKA_LIGHT_TILE_SOURCE: OnlineTileSourceBase = XYTileSource(
-    "CartoVoyagerLitacka",
-    1,
-    20,
-    256,
-    ".png",
-    arrayOf(
-        "https://a.basemaps.cartocdn.com/rastertiles/voyager/",
-        "https://b.basemaps.cartocdn.com/rastertiles/voyager/",
-        "https://c.basemaps.cartocdn.com/rastertiles/voyager/"
-    ),
-    "© OpenStreetMap contributors, © CARTO"
-)
+private fun createCartoTileSource(apiKey: String): OnlineTileSourceBase {
+    val effectiveKey = apiKey.trim().ifBlank { "cb1_4ll2_1_f0afdd71b59d8a4f0f10563a" }
+    return XYTileSource(
+        "CartoVoyagerLitackaLicensed",
+        1,
+        20,
+        256,
+        ".png?key=$effectiveKey",
+        arrayOf(
+            "https://a.basemaps.cartocdn.com/rastertiles/voyager/",
+            "https://b.basemaps.cartocdn.com/rastertiles/voyager/",
+            "https://c.basemaps.cartocdn.com/rastertiles/voyager/",
+            "https://d.basemaps.cartocdn.com/rastertiles/voyager/"
+        ),
+        "© OpenStreetMap contributors, © CARTO"
+    )
+}
 
 @Composable
 fun LiveMapScreen(
@@ -94,7 +97,7 @@ fun LiveMapScreen(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-            setTileSource(LITACKA_LIGHT_TILE_SOURCE)
+            setTileSource(createCartoTileSource(labSettings.cartoApiKey))
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             controller.setZoom(14.5)
@@ -122,10 +125,10 @@ fun LiveMapScreen(
         }
     }
 
-    // Přepínání stylu mapy (Lítačka Světlá vs. Klasická OSM)
-    LaunchedEffect(useClassicOsmTiles) {
+    // Přepínání stylu mapy (Lítačka Světlá s CARTO klíčem vs. Klasická OSM)
+    LaunchedEffect(useClassicOsmTiles, labSettings.cartoApiKey) {
         mapView.setTileSource(
-            if (useClassicOsmTiles) TileSourceFactory.MAPNIK else LITACKA_LIGHT_TILE_SOURCE
+            if (useClassicOsmTiles) TileSourceFactory.MAPNIK else createCartoTileSource(labSettings.cartoApiKey)
         )
         mapView.invalidate()
     }
@@ -239,7 +242,11 @@ fun LiveMapScreen(
                 shadowElevation = 6.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                Column(
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -376,7 +383,8 @@ fun LiveMapScreen(
             shadowElevation = 6.dp,
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 14.dp, bottom = 105.dp)
+                .navigationBarsPadding()
+                .padding(start = 14.dp, bottom = 96.dp)
         ) {
             Text(
                 text = if (useClassicOsmTiles) "🗺️ Styl: Lítačka" else "🗺️ Styl: Klasik OSM",
@@ -403,7 +411,8 @@ fun LiveMapScreen(
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 14.dp, bottom = 105.dp)
+                .navigationBarsPadding()
+                .padding(end = 14.dp, bottom = 96.dp)
                 .size(52.dp)
         ) {
             Icon(
@@ -420,7 +429,8 @@ fun LiveMapScreen(
                 shadowElevation = 10.dp,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 14.dp, vertical = 105.dp)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 14.dp, vertical = 96.dp)
                     .fillMaxWidth()
             ) {
                 Row(

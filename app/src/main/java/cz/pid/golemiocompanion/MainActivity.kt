@@ -11,6 +11,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,8 +28,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import cz.pid.golemiocompanion.data.local.LabPreferencesRepository
 import cz.pid.golemiocompanion.data.repository.GolemioRepositoryImpl
@@ -51,7 +63,9 @@ class MainActivity : ComponentActivity() {
 
         labPreferencesRepository = LabPreferencesRepository(applicationContext)
         tripViewModel = TripViewModel(
-            repository = GolemioRepositoryImpl(),
+            repository = GolemioRepositoryImpl(
+                apiKeyProvider = { labPreferencesRepository.settings.value.golemioApiKey }
+            ),
             labPreferencesRepository = labPreferencesRepository
         )
 
@@ -163,55 +177,52 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        // Spodní navigační lišta
-                        NavigationBar(
-                            containerColor = Color.Transparent,
-                            tonalElevation = 0.dp,
+                        // Dokonale vycentrovaná plovoucí navigační lišta
+                        Box(
                             modifier = Modifier
+                                .fillMaxWidth()
                                 .align(Alignment.BottomCenter)
-                                .padding(horizontal = 16.dp, vertical = 14.dp)
-                                .height(74.dp)
-                                .liquidGlassCard(cornerRadius = 28.dp, borderAlpha = 0.25f)
+                                .navigationBarsPadding()
+                                .padding(horizontal = 20.dp, vertical = 10.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            NavigationBarItem(
-                                selected = currentTab == AppTab.DEPARTURES,
-                                onClick = { currentTab = AppTab.DEPARTURES },
-                                icon = { Icon(Icons.Default.DirectionsBus, contentDescription = null) },
-                                label = { Text("Odjezdy") },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = Color(0xFF38BDF8),
-                                    selectedTextColor = Color(0xFF38BDF8),
-                                    indicatorColor = Color(0xFF0C4A6E).copy(alpha = 0.65f),
-                                    unselectedIconColor = Color(0xFF94A3B8),
-                                    unselectedTextColor = Color(0xFF94A3B8)
-                                )
-                            )
-                            NavigationBarItem(
-                                selected = currentTab == AppTab.LIVE_MAP,
-                                onClick = { currentTab = AppTab.LIVE_MAP },
-                                icon = { Icon(Icons.Default.Map, contentDescription = null) },
-                                label = { Text("Živá Mapa") },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = Color(0xFF38BDF8),
-                                    selectedTextColor = Color(0xFF38BDF8),
-                                    indicatorColor = Color(0xFF0C4A6E).copy(alpha = 0.65f),
-                                    unselectedIconColor = Color(0xFF94A3B8),
-                                    unselectedTextColor = Color(0xFF94A3B8)
-                                )
-                            )
-                            NavigationBarItem(
-                                selected = currentTab == AppTab.LAB,
-                                onClick = { currentTab = AppTab.LAB },
-                                icon = { Icon(Icons.Default.Science, contentDescription = null) },
-                                label = { Text("Laboratoř") },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = Color(0xFF38BDF8),
-                                    selectedTextColor = Color(0xFF38BDF8),
-                                    indicatorColor = Color(0xFF0C4A6E).copy(alpha = 0.65f),
-                                    unselectedIconColor = Color(0xFF94A3B8),
-                                    unselectedTextColor = Color(0xFF94A3B8)
-                                )
-                            )
+                            Surface(
+                                shape = RoundedCornerShape(30.dp),
+                                color = Color(0xF20F172A),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.20f)),
+                                shadowElevation = 16.dp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(68.dp)
+                                    .liquidGlassCard(cornerRadius = 30.dp, borderAlpha = 0.22f)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceEvenly,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    LiquidDockItem(
+                                        selected = currentTab == AppTab.DEPARTURES,
+                                        onClick = { currentTab = AppTab.DEPARTURES },
+                                        icon = Icons.Default.DirectionsBus,
+                                        label = "Odjezdy"
+                                    )
+                                    LiquidDockItem(
+                                        selected = currentTab == AppTab.LIVE_MAP,
+                                        onClick = { currentTab = AppTab.LIVE_MAP },
+                                        icon = Icons.Default.Map,
+                                        label = "Živá Mapa"
+                                    )
+                                    LiquidDockItem(
+                                        selected = currentTab == AppTab.LAB,
+                                        onClick = { currentTab = AppTab.LAB },
+                                        icon = Icons.Default.Science,
+                                        label = "Laboratoř"
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -237,5 +248,61 @@ class MainActivity : ComponentActivity() {
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         isInPipModeState = isInPictureInPictureMode
+    }
+}
+
+@Composable
+private fun RowScope.LiquidDockItem(
+    selected: Boolean,
+    onClick: () -> Unit,
+    icon: ImageVector,
+    label: String
+) {
+    val activeColor = Color(0xFF38BDF8)
+    val inactiveColor = Color(0xFF94A3B8)
+    val animatedBg by animateColorAsState(
+        targetValue = if (selected) Color(0xFF0284C7).copy(alpha = 0.32f) else Color.Transparent,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "dockItemBg"
+    )
+
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.05f else 1.0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "dockItemScale"
+    )
+
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .padding(vertical = 6.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(22.dp))
+            .background(animatedBg)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = if (selected) activeColor else inactiveColor,
+                modifier = Modifier.size(23.dp)
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = label,
+                color = if (selected) activeColor else inactiveColor,
+                fontSize = 11.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+            )
+        }
     }
 }
