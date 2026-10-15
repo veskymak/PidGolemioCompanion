@@ -1,710 +1,485 @@
 package cz.pid.golemiocompanion.ui.trip
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import cz.pid.golemiocompanion.data.local.LabSettings
 import cz.pid.golemiocompanion.domain.model.*
-import cz.pid.golemiocompanion.ui.components.ActiveTripCountdownGlassPanel
-import cz.pid.golemiocompanion.ui.components.MeteoAirQualityGlassCard
-import cz.pid.golemiocompanion.ui.components.liquidGlass
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-
-private val departureHHmmFormatter: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.of("Europe/Prague"))
+import cz.pid.golemiocompanion.ui.components.ActiveCountdownBanner
+import cz.pid.golemiocompanion.ui.components.formatDelayLabel
+import cz.pid.golemiocompanion.ui.components.liquidGlassCard
+import kotlinx.coroutines.delay
 
 @Composable
 fun TripDashboardScreen(
-    viewModel: TripViewModel,
-    modifier: Modifier = Modifier,
-    onNavigateToLab: () -> Unit = {}
+    uiState: TripUiState,
+    labSettings: LabSettings,
+    onSearchQueryChanged: (String) -> Unit,
+    onSelectStop: (PidStop) -> Unit,
+    onSubmitCustomStop: () -> Unit,
+    onToggleTrackDeparture: (DepartureInfo) -> Unit,
+    onClearTrackedDeparture: () -> Unit,
+    onRefreshDepartures: () -> Unit,
+    onRequestGpsLocation: () -> Unit,
+    onCheckHapticAlert: (Long) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val remainingSeconds by viewModel.remainingSecondsFlow.collectAsStateWithLifecycle()
-    val favorites by viewModel.favoritesFlow.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-    LazyColumn(
+    LaunchedEffect(Unit) {
+        while (true) {
+            nowMillis = System.currentTimeMillis()
+            uiState.trackedDeparture?.let { tracked ->
+                val remSec = tracked.remainingSecondsAt(nowMillis)
+                onCheckHapticAlert(remSec)
+            }
+            delay(1_000L)
+        }
+    }
+
+    // Striktní pojistka přímo v UI: zobrazit pouze spoje, které ještě neodjely
+    val activeDepartures = remember(uiState.departures, nowMillis) {
+        uiState.departures.filter { it.exactDepartureEpochMillis >= nowMillis - 5_000L }
+    }
+
+    Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .background(Color(0xFF0B0F19))
+            .padding(horizontal = 14.dp)
     ) {
-        
+        Spacer(modifier = Modifier.height(10.dp))
 
-        if (uiState.trackingMode !is TripTrackingMode.Idle) {
-            item(key = "active_countdown_panel") {
-                ActiveTripCountdownGlassPanel(
-                    trackingMode = uiState.trackingMode,
-                    remainingSecondsProvider = { remainingSeconds },
-                    onActionStillNotHere = viewModel::onActionStillNotHere,
-                    onActionBoarded = viewModel::onActionBoarded,
-                    onActionMissed = viewModel::onActionMissedConnection,
-                    onStopTracking = viewModel::stopTracking
-                )
-            }
-        }
-
-        val rescueMode = uiState.trackingMode as? TripTrackingMode.MissedConnectionRescue
-        if (rescueMode != null) {
-            item(key = "missed_rescue_panel") {
-                MissedConnectionRescueGlassSection(rescueMode = rescueMode)
-            }
-        }
-
-        if (favorites.isNotEmpty()) {
-            item(key = "favorites_row") {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Oblíbené spoje (s časem odjezdu)",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(favorites, key = { it.id }) { fav ->
-                            FavoriteChipGlass(
-                                favorite = fav,
-                                onSelect = { viewModel.selectFavorite(fav) },
-                                onRemove = { viewModel.removeFavoriteConnection(fav.id) }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        item(key = "search_bar_glass") {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .liquidGlass(cornerRadius = 22.dp)
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = uiState.stopSearchQuery,
-                        onValueChange = viewModel::onStopQueryChanged,
-                        label = { Text("Zastávka PID (např. Mladá Boleslav)", color = Color.White.copy(alpha = 0.7f)) },
-                        singleLine = true,
-                        trailingIcon = {
-                            if (uiState.stopSearchQuery.isNotEmpty()) {
-                                IconButton(
-                                    onClick = {
-                                        viewModel.onStopQueryChanged("")
-                                    },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Vymazat zastávku",
-                                        tint = Color.White.copy(alpha = 0.6f),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                        },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color(0xFF60A5FA),
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
-                        ),
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    FilledIconButton(
-                        onClick = viewModel::refreshStopData,
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = Color(0xFF2563EB)
+        // Vyhledávač a našeptávač zastávek (MB, MH, Žďár, Doubrava, Loukov, Turnov, Praha)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .liquidGlassCard(cornerRadius = 22.dp)
+                .padding(12.dp)
+        ) {
+            Column {
+                OutlinedTextField(
+                    value = uiState.searchQuery,
+                    onValueChange = onSearchQueryChanged,
+                    placeholder = {
+                        Text(
+                            "Hledat zastávku (např. Žďár, Doubrava, Mnichovo Hradiště, MB, Turnov…)",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
-                    ) {
+                    },
+                    leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Search,
-                            contentDescription = "Vyhledat odjezdy",
-                            tint = Color.White
+                            contentDescription = null,
+                            tint = Color(0xFF38BDF8)
                         )
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = uiState.lineFilterQuery,
-                        onValueChange = viewModel::onLineFilterChanged,
-                        label = { Text("Filtr linky (např. 412, 177)", color = Color.White.copy(alpha = 0.7f)) },
-                        singleLine = true,
-                        trailingIcon = {
-                            if (uiState.lineFilterQuery.isNotEmpty()) {
-                                IconButton(
-                                    onClick = {
-                                        viewModel.onLineFilterChanged("")
-                                        viewModel.refreshStopData()
-                                    },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
+                    },
+                    trailingIcon = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (uiState.searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { onSearchQueryChanged("") }) {
                                     Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Vymazat filtr linky",
-                                        tint = Color.White.copy(alpha = 0.6f),
-                                        modifier = Modifier.size(16.dp)
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = "Vymazat",
+                                        tint = Color(0xFF94A3B8)
                                     )
                                 }
                             }
-                        },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color(0xFF60A5FA),
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+                            IconButton(onClick = onRequestGpsLocation) {
+                                Icon(
+                                    imageVector = Icons.Default.LocationOn,
+                                    contentDescription = "Najít nejbližší podle GPS",
+                                    tint = Color(0xFF22C55E)
+                                )
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            onSubmitCustomStop()
+                            focusManager.clearFocus()
+                        }
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF38BDF8),
+                        unfocusedBorderColor = Color(0xFF334155)
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-                // Našeptávač návrhů zastávek PID (Suggestions s automatickým načtením po dopsání)
-                if (uiState.stopSuggestions.isNotEmpty()) {
+                // Našeptávač zastávek při psaní
+                if (uiState.searchSuggestions.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .liquidGlass(cornerRadius = 16.dp, tintColor = Color(0xFF38BDF8), surfaceAlphaTop = 0.18f)
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF0F172A))
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "💡 Návrhy zastávek PID:",
-                                color = Color(0xFF38BDF8),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "automatické načtení za 3s",
-                                color = Color.White.copy(alpha = 0.55f),
-                                fontSize = 10.sp
-                            )
-                        }
-
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            uiState.stopSuggestions.forEach { suggestion ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            viewModel.onSelectSuggestedStop(suggestion.name)
-                                        }
-                                        .padding(vertical = 4.dp, horizontal = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Text(
-                                        text = suggestion.icon,
-                                        fontSize = 16.sp
-                                    )
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = suggestion.name,
-                                            color = Color.White,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = "${suggestion.typeDescription} • ${suggestion.subtitle}",
-                                            color = Color.White.copy(alpha = 0.72f),
-                                            fontSize = 11.sp,
-                                            maxLines = 1
-                                        )
+                        uiState.searchSuggestions.take(7).forEach { suggestion ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onSelectStop(suggestion)
+                                        focusManager.clearFocus()
                                     }
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowOutward,
-                                        contentDescription = "Zvolit zastávku",
-                                        tint = Color(0xFF38BDF8).copy(alpha = 0.7f),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "${if (suggestion.isTrain) "🚆" else "🚌"} ${suggestion.displayName}",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = suggestion.region,
+                                    color = Color(0xFF38BDF8),
+                                    fontSize = 11.sp
+                                )
                             }
+                            HorizontalDivider(color = Color(0xFF1E293B), thickness = 0.5.dp)
                         }
                     }
                 }
 
-                // Rychlý výběr oblíbených a mimopražských uzlů (Mladá Boleslav atd.)
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    val presets = listOf(
-                        "Mladá Boleslav,aut.st." to "🚌 MB aut. st.",
-                        "Mladá Boleslav město" to "🚆 MB město",
-                        "Mladá Boleslav, hl.nádr." to "🚆 MB hl.nádr.",
-                        "Černý Most" to "🚌 Černý Most",
-                        "Anděl" to "📍 Anděl",
-                        "Hlavní nádraží" to "🚆 Praha hl.n.",
-                        "Dejvická" to "📍 Dejvická"
-                    )
-                    items(presets) { (query, label) ->
-                        val isSelected = uiState.stopSearchQuery.equals(query, ignoreCase = true)
-                        Surface(
-                            color = if (isSelected) Color(0xFF2563EB) else Color.White.copy(alpha = 0.12f),
-                            shape = MaterialTheme.shapes.small,
-                            modifier = Modifier.clickable {
-                                viewModel.onStopQueryChanged(query)
-                                viewModel.refreshStopData()
-                            }
-                        ) {
-                            Text(
-                                text = label,
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
-                            )
-                        }
-                    }
-                }
-
-                // Dynamický našeptávač zastávek pro Mladou Boleslav
-                val queryNorm = uiState.stopSearchQuery.lowercase()
-                if (queryNorm.contains("boles") || queryNorm.contains("mlad") || queryNorm == "mb") {
-                    val mbStops = listOf(
-                        "Mladá Boleslav město",
-                        "Mladá Boleslav,aut.st.",
-                        "Mladá Boleslav, hl.nádr.",
-                        "Mladá Boleslav, nám. Republiky",
-                        "Mladá Boleslav, Václava Klementa",
-                        "Mladá Boleslav, U Sportu",
-                        "Mladá Boleslav, Kosmonosy"
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = "Zastávky v Mladé Boleslavi:",
-                            color = Color(0xFF38BDF8),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(mbStops) { stopName ->
-                                Surface(
-                                    color = Color(0xFF0369A1).copy(alpha = 0.4f),
-                                    shape = MaterialTheme.shapes.extraSmall,
-                                    modifier = Modifier.clickable {
-                                        viewModel.onStopQueryChanged(stopName)
-                                        viewModel.refreshStopData()
-                                    }
-                                ) {
-                                    val chipText = if (stopName.contains(", ")) {
-                                        stopName.substringAfter(", ")
-                                    } else {
-                                        stopName.replace("Mladá Boleslav ", "")
-                                    }
-                                    Text(
-                                        text = chipText,
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        item(key = "departures_header") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Nejbližší odjezdy • ${uiState.stopSearchQuery}",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                if (uiState.isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = Color(0xFF60A5FA)
-                    )
-                } else {
-                    val badgeText = when {
-                        uiState.isLiveData -> "● LIVE Golemio"
-                        uiState.isApiKeyConfigured -> "● Golemio API"
-                        else -> "● Bez API klíče"
-                    }
-                    val badgeColor = when {
-                        uiState.isLiveData -> Color(0xFF4ADE80)
-                        uiState.isApiKeyConfigured -> Color(0xFF38BDF8)
-                        else -> Color(0xFFFBBF24)
-                    }
-                    Text(
-                        text = badgeText,
-                        color = badgeColor,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
-                    )
-                }
-            }
-        }
-
-        if (!uiState.isApiKeyConfigured) {
-            item(key = "api_key_prompt_card") {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .liquidGlass(cornerRadius = 22.dp, tintColor = Color(0xFFF59E0B), surfaceAlphaTop = 0.28f)
-                        .padding(18.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
+                // Doporučené nejbližší zastávky podle GPS
+                if (uiState.nearbyStops.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Key,
-                            contentDescription = null,
-                            tint = Color(0xFFFBBF24),
-                            modifier = Modifier.size(22.dp)
+                        Text(
+                            text = "📍 Nejbližší zastávky podle GPS",
+                            color = Color(0xFF4ADE80),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "Chybí Golemio API klíč",
-                            color = Color(0xFFFBBF24),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
+                            text = "Aktualizovat GPS",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 11.sp,
+                            modifier = Modifier.clickable { onRequestGpsLocation() }
                         )
                     }
-                    Text(
-                        text = "Pro načtení živých odjezdů autobusů a vlaků zadejte svůj bezplatný klíč v sekci Laboratoř. Aplikace si bez klíče data nevymýšlí (demo data byla vypnuta).",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center
-                    )
-                    Button(
-                        onClick = onNavigateToLab,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
-                    ) {
-                        Text("Zadat klíč v Laboratoři", color = Color.White, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(uiState.nearbyStops) { nearby ->
+                            val isSelected = nearby.stop.golemioPrimaryName == uiState.selectedStop.golemioPrimaryName
+                            AssistChip(
+                                onClick = { onSelectStop(nearby.stop) },
+                                label = {
+                                    Text(
+                                        text = "${if (nearby.stop.isTrain) "🚆" else "🚌"} ${nearby.stop.displayName} (${nearby.formattedDistance})",
+                                        color = if (isSelected) Color(0xFF0F172A) else Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = if (isSelected) Color(0xFF4ADE80) else Color(0xFF1E293B)
+                                ),
+                                border = null
+                            )
+                        }
+                    }
+                } else {
+                    // Rychlé přepínače oblíbených zastávek (Žďár, Doubrava, Loukov, MH, MB, Turnov)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(PidStopDirectory.quickSelectStops) { stop ->
+                            val isSelected = stop.golemioPrimaryName == uiState.selectedStop.golemioPrimaryName
+                            AssistChip(
+                                onClick = { onSelectStop(stop) },
+                                label = {
+                                    Text(
+                                        text = "${if (stop.isTrain) "🚆" else "🚌"} ${stop.displayName}",
+                                        color = if (isSelected) Color(0xFF0F172A) else Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = if (isSelected) Color(0xFF38BDF8) else Color(0xFF283246)
+                                ),
+                                border = null
+                            )
+                        }
                     }
                 }
             }
         }
 
-        uiState.departuresError?.let { error ->
-            item(key = "departures_error") {
-                Text(
-                    text = error,
-                    color = Color(0xFFFCA5A5),
-                    fontSize = 14.sp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .liquidGlass(cornerRadius = 18.dp)
-                        .padding(14.dp)
-                )
-            }
-        }
+        Spacer(modifier = Modifier.height(10.dp))
 
-        if (uiState.isApiKeyConfigured && uiState.departures.isEmpty() && uiState.departuresError == null && !uiState.isLoading) {
-            item(key = "departures_empty") {
-                Text(
-                    text = if (uiState.lineFilterQuery.isNotBlank()) {
-                        "Pro linku ${uiState.lineFilterQuery} nebyly na zastávce „${uiState.stopSearchQuery}“ nalezeny žádné odjezdy v příští hodině."
-                    } else {
-                        "Pro zastávku „${uiState.stopSearchQuery}“ nebyly nalezeny žádné odjezdy v příští hodině."
-                    },
-                    color = Color.White.copy(alpha = 0.7f),
-                    fontSize = 14.sp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .liquidGlass(cornerRadius = 18.dp)
-                        .padding(14.dp)
-                )
-            }
-        }
-
-        items(uiState.departures, key = { it.tripId }) { connection ->
-            DepartureRowGlassCard(
-                connection = connection,
-                onSelectForCountdown = { viewModel.startTrackingConnection(connection) },
-                onSaveFavorite = { timeHHmm ->
-                    viewModel.saveFavoriteConnection(connection, timeHHmm)
-                }
+        // Aktivní sekundový odpočet vybraného spoje
+        uiState.trackedDeparture?.let { tracked ->
+            ActiveCountdownBanner(
+                departure = tracked,
+                isPipMode = false,
+                onStopTracking = onClearTrackedDeparture
             )
+            Spacer(modifier = Modifier.height(10.dp))
         }
-    }
-}
 
-@Composable
-private fun DepartureRowGlassCard(
-    connection: StopConnection,
-    onSelectForCountdown: () -> Unit,
-    onSaveFavorite: (String) -> Unit
-) {
-    val nowMs = System.currentTimeMillis()
-    val diffMs = connection.effectiveDepartureEpochMs - nowMs
-    val inMinutes = (diffMs / 60_000L).coerceAtLeast(0L)
-    val isArrivingNow = diffMs in -120_000L..45_000L
-    val plannedHHmm = remember(connection.scheduledDepartureEpochMs) {
-        departureHHmmFormatter.format(Instant.ofEpochMilli(connection.scheduledDepartureEpochMs))
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .liquidGlass(cornerRadius = 20.dp)
-            .clickable(onClick = onSelectForCountdown)
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
+        // Hlavička odjezdové tabule
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
-        ) {
-            Surface(
-                color = if (connection.routeType == 0) Color(0xFFDC2626) else Color(0xFF2563EB),
-                shape = MaterialTheme.shapes.small
-            ) {
-                Text(
-                    text = connection.routeShortName,
-                    color = Color.White,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 16.sp,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(
-                    text = connection.headsign,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
-                )
-                Text(
-                    text = "Nástupiště ${connection.platformCode} • JŘ $plannedHHmm" +
-                        if (connection.totalDelaySeconds > 0) " (+${connection.totalDelaySeconds}s)" else " (včas)",
-                    color = Color.White.copy(alpha = 0.72f),
-                    fontSize = 12.sp
-                )
-            }
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = when {
-                        isArrivingNow -> "PŘÍJEZD"
-                        inMinutes == 0L -> "< 1 min"
-                        inMinutes >= 60L -> "${inMinutes / 60} h ${inMinutes % 60} min"
-                        else -> "$inMinutes min"
-                    },
-                    color = if (isArrivingNow) Color(0xFF34D399) else Color(0xFF38BDF8),
-                    fontWeight = FontWeight.Black,
-                    fontSize = if (isArrivingNow) 15.sp else 18.sp
-                )
-                Text(
-                    text = "Spustit odpočet",
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 10.sp
-                )
-            }
-            IconButton(onClick = { onSaveFavorite(plannedHHmm) }) {
-                Icon(
-                    imageVector = Icons.Default.StarBorder,
-                    contentDescription = "Uložit spoj s časem do oblíbených",
-                    tint = Color(0xFFFACC15)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun FavoriteChipGlass(
-    favorite: FavoriteConnection,
-    onSelect: () -> Unit,
-    onRemove: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .liquidGlass(cornerRadius = 16.dp, tintColor = Color(0xFFFACC15))
-            .clickable(onClick = onSelect)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = Icons.Default.Star,
-            contentDescription = null,
-            tint = Color(0xFFFACC15),
-            modifier = Modifier.size(16.dp)
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Column {
-            Text(
-                text = "${favorite.routeShortName} • ${favorite.stopName}",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp
-            )
-            Text(
-                text = "Odjezd ${favorite.preferredDepartureTimeHHmm} → ${favorite.headsign}",
-                color = Color.White.copy(alpha = 0.75f),
-                fontSize = 11.sp
-            )
-        }
-        Spacer(modifier = Modifier.width(6.dp))
-        Icon(
-            imageVector = Icons.Default.Close,
-            contentDescription = "Odebrat",
-            tint = Color.White.copy(alpha = 0.6f),
             modifier = Modifier
-                .size(16.dp)
-                .clickable(onClick = onRemove)
-        )
-    }
-}
-
-@Composable
-private fun MissedConnectionRescueGlassSection(
-    rescueMode: TripTrackingMode.MissedConnectionRescue
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .liquidGlass(cornerRadius = 24.dp, tintColor = Color(0xFFEC4899))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Default.DirectionsBike,
-                contentDescription = null,
-                tint = Color(0xFFF472B6)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
             Text(
-                text = "Záchranná mikromobilita (Nextbike & Rekola v okolí)",
+                text = "Nejbližší odjezdy • ${uiState.selectedStop.displayName}",
                 color = Color.White,
+                fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
-                fontSize = 15.sp
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF22C55E))
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = "LIVE Golemio",
+                    color = Color(0xFF22C55E),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                IconButton(
+                    onClick = onRefreshDepartures,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Obnovit",
+                        tint = Color(0xFF94A3B8),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
         }
 
-        rescueMode.nearbyBikes.forEach { bike ->
-            Row(
+        if (uiState.isLoading && activeDepartures.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Color(0xFF38BDF8))
+            }
+        } else if (uiState.errorMessage != null && activeDepartures.isEmpty()) {
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .liquidGlass(cornerRadius = 14.dp, surfaceAlphaTop = 0.14f)
-                    .padding(10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(top = 32.dp)
+                    .liquidGlassCard()
+                    .padding(20.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Column {
-                    Text(
-                        text = "${bike.provider}: ${bike.name}",
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp
-                    )
-                    Text(
-                        text = "Vzdálenost ${bike.distanceMeters} m (~${bike.walkingMinutes} min chůze)",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 11.sp
-                    )
-                }
-                Surface(
-                    color = Color(0xFF10B981).copy(alpha = 0.25f),
-                    shape = MaterialTheme.shapes.small
-                ) {
-                    Text(
-                        text = "${bike.freeBikes} volných kol",
-                        color = Color(0xFF6EE7B7),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
-        }
-
-        if (rescueMode.emergencyTransfers.isNotEmpty()) {
-            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.TransferWithinAStation,
-                    contentDescription = null,
-                    tint = Color(0xFF38BDF8)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Krizový přestup z okolních zastávek (do 600 m)",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
+                    text = uiState.errorMessage,
+                    color = Color(0xFFF87171),
                     fontSize = 14.sp
                 )
             }
-
-            rescueMode.emergencyTransfers.forEach { transfer ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .liquidGlass(cornerRadius = 14.dp, tintColor = Color(0xFF38BDF8))
-                        .padding(10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "Linka ${transfer.routeShortName} ze zast. ${transfer.nearbyStopName} (${transfer.platformCode})",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
-                        )
-                        Text(
-                            text = "${transfer.headsign} • ${transfer.distanceMeters} m pěšky",
-                            color = Color.White.copy(alpha = 0.75f),
-                            fontSize = 11.sp
-                        )
-                    }
-                    Text(
-                        text = "za ${transfer.departureInMinutes} min",
-                        color = Color(0xFF7DD3FC),
-                        fontWeight = FontWeight.Black,
-                        fontSize = 14.sp
+        } else if (activeDepartures.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 32.dp)
+                    .liquidGlassCard()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "V nejbližších 3 hodinách nejsou ze zastávky ${uiState.selectedStop.displayName} hlášeny žádné další odjezdy.",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 14.sp
+                )
+            }
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 110.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(activeDepartures, key = { it.id }) { departure ->
+                    DepartureRowCard(
+                        departure = departure,
+                        nowMillis = nowMillis,
+                        showExactSeconds = labSettings.showExactSecondsInBoard,
+                        isTracked = uiState.trackedDeparture?.id == departure.id,
+                        onToggleTrack = { onToggleTrackDeparture(departure) }
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DepartureRowCard(
+    departure: DepartureInfo,
+    nowMillis: Long,
+    showExactSeconds: Boolean,
+    isTracked: Boolean,
+    onToggleTrack: () -> Unit
+) {
+    val remainingSeconds = departure.remainingSecondsAt(nowMillis).coerceAtLeast(0L)
+    val remainingMinutes = remainingSeconds / 60L
+    val remSecPart = remainingSeconds % 60L
+
+    val countdownText = when {
+        showExactSeconds && remainingMinutes < 60 -> String.format("%d:%02d", remainingMinutes, remSecPart)
+        remainingSeconds < 60 -> "< 1 min"
+        else -> "$remainingMinutes min"
+    }
+
+    val badgeColor = when (departure.vehicleType) {
+        VehicleType.TRAM -> Color(0xFFC8102E)
+        VehicleType.METRO -> when (departure.routeShortName) {
+            "A" -> Color(0xFF00A562)
+            "B" -> Color(0xFFF8B323)
+            "C" -> Color(0xFFCF003D)
+            else -> Color(0xFF2563EB)
+        }
+        VehicleType.TRAIN -> Color(0xFF2563EB)
+        else -> Color(0xFF0284C7)
+    }
+
+    val delayColor = when {
+        !departure.isDelayAvailable -> Color(0xFF94A3B8)
+        departure.delaySeconds <= 60 -> Color(0xFF4ADE80)
+        departure.delaySeconds <= 180 -> Color(0xFFFBBF24)
+        else -> Color(0xFFF87171)
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidGlassCard(
+                cornerRadius = 20.dp,
+                borderAlpha = if (isTracked) 0.45f else 0.16f
+            )
+            .clickable { onToggleTrack() }
+            .padding(horizontal = 14.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Číslo linky
+        Box(
+            modifier = Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 42.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(badgeColor)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = departure.routeShortName,
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        // Směr a přesný čas JŘ + zpoždění Golemio
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = departure.headsign,
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(3.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val platformText = departure.platformCode?.let { "Nástupiště $it • " } ?: ""
+                Text(
+                    text = "${platformText}JŘ ${departure.scheduledTimeFormatted} ",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 13.sp
+                )
+                Text(
+                    text = "(${formatDelayLabel(departure.delaySeconds, departure.isDelayAvailable)})",
+                    color = delayColor,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Odpočet a hvězdička
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = countdownText,
+                color = if (remainingSeconds < 60) Color(0xFF38BDF8) else Color(0xFF60A5FA),
+                fontSize = 20.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+            Text(
+                text = if (isTracked) "Odpočet běží" else "Spustit odpočet",
+                color = if (isTracked) Color(0xFFFBBF24) else Color(0xFF94A3B8),
+                fontSize = 11.sp
+            )
+        }
+
+        IconButton(onClick = onToggleTrack) {
+            Icon(
+                imageVector = if (isTracked) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                contentDescription = "Spustit odpočet",
+                tint = if (isTracked) Color(0xFFFBBF24) else Color(0xFFFBBF24).copy(alpha = 0.75f)
+            )
         }
     }
 }

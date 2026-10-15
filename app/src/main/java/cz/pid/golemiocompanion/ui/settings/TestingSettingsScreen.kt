@@ -1,359 +1,155 @@
 package cz.pid.golemiocompanion.ui.settings
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Science
-import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import cz.pid.golemiocompanion.ui.components.liquidGlass
-import cz.pid.golemiocompanion.ui.trip.TripViewModel
+import cz.pid.golemiocompanion.data.local.LabPreferencesRepository
+import cz.pid.golemiocompanion.data.local.LabSettings
+import cz.pid.golemiocompanion.ui.components.liquidGlassCard
+import kotlin.math.roundToInt
 
 @Composable
 fun TestingSettingsScreen(
-    viewModel: TripViewModel,
-    onRequestFloatingPip: () -> Unit,
+    settings: LabSettings,
+    repository: LabPreferencesRepository,
     modifier: Modifier = Modifier
 ) {
-    val labSettings by viewModel.labSettingsFlow.collectAsStateWithLifecycle()
-    var apiKeyDraft by remember(labSettings.golemioApiKey) {
-        mutableStateOf(labSettings.golemioApiKey)
-    }
-
-    LazyColumn(
+    Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .background(Color(0xFF0B0F19))
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item(key = "api_token_section") {
-            val isGolemioConfigured = labSettings.golemioApiKey.isNotBlank()
+        Text(
+            text = "Laboratoř funkcí",
+            color = Color.White,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.ExtraBold
+        )
+        Text(
+            text = "Všechny přepínače níže jsou plně funkční a okamžitě ovlivňují chování odpočtu, GPS a mapy.",
+            color = Color(0xFF94A3B8),
+            fontSize = 13.sp
+        )
 
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .liquidGlass(
-                        cornerRadius = 22.dp,
-                        tintColor = if (isGolemioConfigured) Color(0xFF10B981) else Color(0xFFF59E0B)
-                    )
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Golemio & PID OpenAPI Klíč",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
-                    )
-                    Surface(
-                        color = if (isGolemioConfigured) Color(0xFF10B981).copy(alpha = 0.25f) else Color(0xFFF59E0B).copy(alpha = 0.25f),
-                        shape = MaterialTheme.shapes.extraSmall
-                    ) {
-                        Text(
-                            text = if (isGolemioConfigured) "AKTIVNÍ" else "DEMO DATA",
-                            color = if (isGolemioConfigured) Color(0xFF4ADE80) else Color(0xFFFBBF24),
-                            fontWeight = FontWeight.Black,
-                            fontSize = 10.sp,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-                OutlinedTextField(
-                    value = apiKeyDraft,
-                    onValueChange = { apiKeyDraft = it },
-                    label = { Text("Vložte svůj Golemio API klíč (X-Access-Token)", color = Color.White.copy(alpha = 0.7f)) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF38BDF8),
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Button(
-                    onClick = { viewModel.onApiKeyUpdated(apiKeyDraft) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                    modifier = Modifier.align(Alignment.End)
-                ) {
-                    Text("Uložit API klíč", color = Color.White)
-                }
-            }
-        }
+        LabSwitchCard(
+            title = "PiP (Obraz v obraze) plovoucí odpočet",
+            description = "Při minimalizaci aplikace během aktivního sledování spoje přepne odpočet do plovoucího okna.",
+            checked = settings.enablePipCountdown,
+            onCheckedChange = { repository.setEnablePipCountdown(it) }
+        )
 
-        item(key = "google_maps_api_section") {
-            val effectiveMapsKey = labSettings.googleMapsApiKey.ifBlank { cz.pid.golemiocompanion.BuildConfig.MAPS_API_KEY }.trim()
-            val isConfigured = effectiveMapsKey.isNotBlank() &&
-                !effectiveMapsKey.contains("YOUR_GOOGLE_MAPS_API_KEY")
-            var mapsKeyDraft by remember(effectiveMapsKey) {
-                mutableStateOf(effectiveMapsKey)
-            }
+        LabSwitchCard(
+            title = "Haptické varování před odjezdem (3m / 1m / 30s)",
+            description = "Zavibruje telefonem přesně 3 minuty, 1 minutu a 30 sekund před odjezdem sledovaného spoje.",
+            checked = settings.enableSmartDepartureAlerts,
+            onCheckedChange = { repository.setEnableSmartDepartureAlerts(it) }
+        )
 
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .liquidGlass(
-                        cornerRadius = 22.dp,
-                        tintColor = if (isConfigured) Color(0xFF10B981) else Color(0xFFF59E0B)
-                    )
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Google Maps API (Živá mapa)",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
-                    )
-                    Surface(
-                        color = if (isConfigured) Color(0xFF10B981).copy(alpha = 0.25f) else Color(0xFFF59E0B).copy(alpha = 0.25f),
-                        shape = MaterialTheme.shapes.extraSmall
-                    ) {
-                        Text(
-                            text = if (isConfigured) "AKTIVNÍ" else "NEZADÁNO",
-                            color = if (isConfigured) Color(0xFF4ADE80) else Color(0xFFFBBF24),
-                            fontWeight = FontWeight.Black,
-                            fontSize = 10.sp,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
+        LabSwitchCard(
+            title = "Přesné sekundy přímo v seznamu odjezdů",
+            description = "Místo zaokrouhlených minut (a < 1 min) zobrazuje na všech kartách v tabuli živý odpočet v sekundách (MM:SS).",
+            checked = settings.showExactSecondsInBoard,
+            onCheckedChange = { repository.setShowExactSecondsInBoard(it) }
+        )
 
-                if (isConfigured) {
-                    val preview = if (effectiveMapsKey.length > 12) {
-                        "${effectiveMapsKey.take(8)}...${effectiveMapsKey.takeLast(4)}"
-                    } else effectiveMapsKey
-                    Text(
-                        text = "Aktuálně načtený klíč: $preview",
-                        color = Color(0xFF34D399),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+        LabSwitchCard(
+            title = "Automaticky vybrat nejbližší zastávku po startu",
+            description = "Po získání GPS polohy při spuštění aplikace rovnou přepne odjezdovou tabuli na nejbližší zastávku v okolí.",
+            checked = settings.autoSelectNearestStopOnStart,
+            onCheckedChange = { repository.setAutoSelectNearestStopOnStart(it) }
+        )
 
-                OutlinedTextField(
-                    value = mapsKeyDraft,
-                    onValueChange = { mapsKeyDraft = it },
-                    label = { Text("Vložte svůj Google Maps API klíč", color = Color.White.copy(alpha = 0.7f)) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF38BDF8),
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
+        LabSwitchCard(
+            title = "Rozšířené štítky zpoždění na mapě",
+            description = "Zobrazí přímo ve štítku vozidla na mapě i zpoždění v minutách (např. 315 +2m).",
+            checked = settings.showExtendedMapBadges,
+            onCheckedChange = { repository.setShowExtendedMapBadges(it) }
+        )
 
-                Button(
-                    onClick = { viewModel.onGoogleMapsApiKeyUpdated(mapsKeyDraft) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                    modifier = Modifier.align(Alignment.End)
-                ) {
-                    Text("Uložit Maps klíč", color = Color.White)
-                }
-
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .liquidGlassCard()
+                .padding(16.dp)
+        ) {
+            Column {
                 Text(
-                    text = "Lze použít klíč z Google Cloud Console nebo bezplatný Demo Key z developers.google.com/maps/demo-key (bez kreditní karty). Na obrazovce Živá mapa pak zvolte režim „Google Web“, který tento Demo Key přímo podporuje.",
-                    color = Color.White.copy(alpha = 0.8f),
-                    fontSize = 12.sp,
-                    lineHeight = 17.sp
+                    text = "Poloměr vyhledávání blízkých zastávek: ${settings.nearbyRadiusKm} km",
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
                 )
-            }
-        }
-
-        item(key = "lab_warning_badge") {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .liquidGlass(cornerRadius = 20.dp, tintColor = Color(0xFFF59E0B), surfaceAlphaTop = 0.24f)
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.WarningAmber,
-                    contentDescription = "Varování",
-                    tint = Color(0xFFFBBF24),
-                    modifier = Modifier.size(32.dp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Určuje maximální vzdálenost pro doporučení nejbližších zastávek podle GPS.",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 12.sp
                 )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = "Laboratoř (Tyto funkce nemusí fungovat spolehlivě nebo mohou padat)",
-                        color = Color(0xFFFDE68A),
-                        fontWeight = FontWeight.Black,
-                        fontSize = 14.sp
+                Slider(
+                    value = settings.nearbyRadiusKm.toFloat(),
+                    onValueChange = { repository.setNearbyRadiusKm(it.roundToInt()) },
+                    valueRange = 1f..25f,
+                    steps = 23,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color(0xFF38BDF8),
+                        activeTrackColor = Color(0xFF38BDF8)
                     )
-                    Text(
-                        text = "Experimentální telemetrické a vykreslovací algoritmy pro testování v terénu.",
-                        color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 12.sp
-                    )
-                }
-            }
-        }
-
-        item(key = "lab_1_dead_reckoning") {
-            LabFeatureSwitchGlassCard(
-                title = "Dead Reckoning polohy v tunelech / výpadcích",
-                badgeText = "Experimentální",
-                badgeColor = Color(0xFFFBBF24),
-                description = "Pokud API přestane posílat GPS aktualizace (např. tunel Blanka nebo ztráta signálu), aplikace se pokusí dopočítávat polohu autobusu na mapě matematicky podle plánované rychlosti trasy. Varování: může ukazovat falešnou polohu, pokud autobus stojí v zácpě.",
-                checked = labSettings.deadReckoningInTunnels,
-                onCheckedChange = { viewModel.onLabToggleChanged("dead_reckoning", it) }
-            )
-        }
-
-        item(key = "lab_2_input_gateway") {
-            LabFeatureSwitchGlassCard(
-                title = "Přímý telemetrický stream (Input Gateway bridge)",
-                badgeText = "Nestabilní",
-                badgeColor = Color(0xFFF87171),
-                description = "Pokus o agresivní dotazování nezpracovaných telemetrických endpointů namísto zpožděné agregované cache. Může vracet chyby HTTP 403/429 nebo způsobit rate limiting klíče.",
-                checked = labSettings.rawInputGatewayStream,
-                onCheckedChange = { viewModel.onLabToggleChanged("raw_gateway", it) }
-            )
-        }
-
-        item(key = "lab_3_phantom_ai") {
-            LabFeatureSwitchGlassCard(
-                title = "Fantomová predikce zpoždění (AI Heuristika)",
-                badgeText = "Experimentální",
-                badgeColor = Color(0xFFFBBF24),
-                description = "Algoritmus, který na základě počasí z Golemio API a aktuální špičky uměle navyšuje odhadované zpoždění předtím, než ho oficiálně zaznamená dispečink PID. Může být nepřesné.",
-                checked = labSettings.phantomAiDelayPrediction,
-                onCheckedChange = { viewModel.onLabToggleChanged("phantom_ai", it) }
-            )
-        }
-
-        item(key = "lab_4_forced_120hz") {
-            LabFeatureSwitchGlassCard(
-                title = "Vynucený 120Hz/144Hz agresivní render",
-                badgeText = "Nestabilní",
-                badgeColor = Color(0xFFF87171),
-                description = "Vynucení maximální snímkové frekvence a vypnutí jakéhokoliv omezování překreslování v Compose. Zvyšuje spotřebu baterie a může zahřívat telefon.",
-                checked = labSettings.forced120HzAggressiveRender,
-                onCheckedChange = { viewModel.onLabToggleChanged("forced_120hz", it) }
-            )
-        }
-
-        item(key = "lab_5_emergency_600m") {
-            LabFeatureSwitchGlassCard(
-                title = "Doporučit krizový přestup z okolních zastávek",
-                badgeText = "Beta",
-                badgeColor = Color(0xFF38BDF8),
-                description = "Při kliknutí na \"Ujel mi\" prohledá všechny zastávky v okruhu 600 metrů a navrhne alternativní linky vedoucí do stejného cíle.",
-                checked = labSettings.emergencyTransfer600m,
-                onCheckedChange = { viewModel.onLabToggleChanged("emergency_600m", it) }
-            )
-        }
-
-        item(key = "lab_6_pip_overlay") {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                LabFeatureSwitchGlassCard(
-                    title = "Plovoucí mini-odpočet (Picture-in-Picture / Overlay)",
-                    badgeText = "Nestabilní",
-                    badgeColor = Color(0xFFF87171),
-                    description = "Pokus o zobrazení odpočtu v plovoucí bublině přes ostatní aplikace při minimalizaci. Může být ukončeno agresivní správou paměti systému Android.",
-                    checked = labSettings.floatingPipMiniCountdown,
-                    onCheckedChange = { viewModel.onLabToggleChanged("floating_pip", it) }
                 )
-
-                if (labSettings.floatingPipMiniCountdown) {
-                    OutlinedButton(
-                        onClick = onRequestFloatingPip,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Science, contentDescription = null, tint = Color(0xFF38BDF8))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Otestovat přechod do plovoucího PiP okna ihned", color = Color.White)
-                    }
-                }
             }
         }
+
+        Spacer(modifier = Modifier.height(100.dp))
     }
 }
 
 @Composable
-private fun LabFeatureSwitchGlassCard(
+private fun LabSwitchCard(
     title: String,
-    badgeText: String,
-    badgeColor: Color,
     description: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .liquidGlass(
-                cornerRadius = 20.dp,
-                tintColor = if (checked) badgeColor else Color(0xFF64748B)
-            )
+            .liquidGlassCard()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Surface(
-                    color = badgeColor.copy(alpha = 0.2f),
-                    shape = MaterialTheme.shapes.extraSmall
-                ) {
-                    Text(
-                        text = badgeText.uppercase(),
-                        color = badgeColor,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 10.sp,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = title,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
-                )
-            }
-
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = badgeColor
-                )
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = description,
+                color = Color(0xFF94A3B8),
+                fontSize = 12.sp
             )
         }
-
-        Text(
-            text = description,
-            color = Color.White.copy(alpha = 0.75f),
-            fontSize = 12.sp,
-            lineHeight = 17.sp
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF0284C7)
+            )
         )
     }
 }

@@ -1,18 +1,16 @@
 package cz.pid.golemiocompanion
 
+import android.Manifest
 import android.app.PictureInPictureParams
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -23,225 +21,213 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import androidx.core.content.ContextCompat
 import cz.pid.golemiocompanion.data.local.LabPreferencesRepository
-import cz.pid.golemiocompanion.data.remote.api.GolemioApiService
 import cz.pid.golemiocompanion.data.repository.GolemioRepositoryImpl
-import cz.pid.golemiocompanion.domain.model.TripTrackingMode
-import cz.pid.golemiocompanion.ui.components.liquidGlass
+import cz.pid.golemiocompanion.ui.components.ActiveCountdownBanner
+import cz.pid.golemiocompanion.ui.components.liquidGlassCard
 import cz.pid.golemiocompanion.ui.map.LiveMapScreen
 import cz.pid.golemiocompanion.ui.settings.TestingSettingsScreen
-import cz.pid.golemiocompanion.ui.theme.PidGolemioGlassTheme
+import cz.pid.golemiocompanion.ui.theme.GolemioCompanionTheme
 import cz.pid.golemiocompanion.ui.trip.TripDashboardScreen
 import cz.pid.golemiocompanion.ui.trip.TripViewModel
-import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import retrofit2.Retrofit
-import java.util.concurrent.TimeUnit
-import kotlin.math.abs
+
+enum class AppTab {
+    DEPARTURES,
+    LIVE_MAP,
+    LAB
+}
 
 class MainActivity : ComponentActivity() {
 
+    private lateinit var labPreferencesRepository: LabPreferencesRepository
     private lateinit var tripViewModel: TripViewModel
-    private val _isInPipMode = mutableStateOf(false)
+    private var isInPipModeState by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val json = Json {
-            ignoreUnknownKeys = true
-            coerceInputValues = true
-            isLenient = true
-        }
-
-        val okHttpClient = OkHttpClient.Builder()
-            .connectTimeout(12, TimeUnit.SECONDS)
-            .readTimeout(12, TimeUnit.SECONDS)
-            .build()
-
-        val retrofit = Retrofit.Builder()
-            .baseUrl(BuildConfig.GOLEMIO_BASE_URL)
-            .client(okHttpClient)
-            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
-            .build()
-
-        val apiService = retrofit.create(GolemioApiService::class.java)
-        val repository = GolemioRepositoryImpl(apiService)
-        val prefsRepository = LabPreferencesRepository(applicationContext)
-
-        tripViewModel = ViewModelProvider(
-            this,
-            object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                    return TripViewModel(repository, prefsRepository) as T
-                }
-            }
-        )[TripViewModel::class.java]
+        labPreferencesRepository = LabPreferencesRepository(applicationContext)
+        tripViewModel = TripViewModel(
+            repository = GolemioRepositoryImpl(),
+            labPreferencesRepository = labPreferencesRepository
+        )
 
         setContent {
-            val labSettings by tripViewModel.labSettingsFlow.collectAsStateWithLifecycle()
-            val isInPip by remember { _isInPipMode }
+            GolemioCompanionTheme {
+                val uiState by tripViewModel.uiState.collectAsState()
+                val labSettings by tripViewModel.labSettings.collectAsState()
+                var currentTab by remember { mutableStateOf(AppTab.DEPARTURES) }
 
-            LaunchedEffect(labSettings.forced120HzAggressiveRender) {
-                applyAggressiveHighRefreshRate(labSettings.forced120HzAggressiveRender)
-            }
+                // Automatické vyžádání polohy při startu aplikace a doporučení nejbližších zastávek
+                val locationPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestMultiplePermissions()
+                ) { permissions ->
+                    val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                        permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+                    if (granted) {
+                        tripViewModel.fetchDeviceLocationAndRecommendStops(
+                            context = this@MainActivity,
+                            forceSelectNearest = false
+                        )
+                    }
+                }
 
-            PidGolemioGlassTheme {
-                if (isInPip) {
-                    // Kompaktní widget v režimu obrazu v obraze (Picture-in-Picture)
-                    PipFloatingCountdownWidget(viewModel = tripViewModel)
+                LaunchedEffect(Unit) {
+                    val hasFine = ContextCompat.checkSelfPermission(
+                        this@MainActivity,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+                    val hasCoarse = ContextCompat.checkSelfPermission(
+                        this@MainActivity,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+
+                    if (hasFine || hasCoarse) {
+                        tripViewModel.fetchDeviceLocationAndRecommendStops(
+                            context = this@MainActivity,
+                            forceSelectNearest = false
+                        )
+                    } else {
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
+                    }
+                }
+
+                if (isInPipModeState && uiState.trackedDeparture != null) {
+                    ActiveCountdownBanner(
+                        departure = uiState.trackedDeparture!!,
+                        isPipMode = true,
+                        onStopTracking = { tripViewModel.clearTrackedDeparture() }
+                    )
                 } else {
-                    val navController = rememberNavController()
-                    val navBackStackEntry by navController.currentBackStackEntryAsState()
-                    val currentRoute = navBackStackEntry?.destination?.route ?: "trip"
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        when (currentTab) {
+                            AppTab.DEPARTURES -> {
+                                TripDashboardScreen(
+                                    uiState = uiState,
+                                    labSettings = labSettings,
+                                    onSearchQueryChanged = tripViewModel::onSearchQueryChanged,
+                                    onSelectStop = tripViewModel::selectStop,
+                                    onSubmitCustomStop = tripViewModel::submitCustomStopQuery,
+                                    onToggleTrackDeparture = tripViewModel::toggleTrackDeparture,
+                                    onClearTrackedDeparture = tripViewModel::clearTrackedDeparture,
+                                    onRefreshDepartures = tripViewModel::refreshDeparturesNow,
+                                    onRequestGpsLocation = {
+                                        locationPermissionLauncher.launch(
+                                            arrayOf(
+                                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                                Manifest.permission.ACCESS_COARSE_LOCATION
+                                            )
+                                        )
+                                        tripViewModel.fetchDeviceLocationAndRecommendStops(
+                                            context = this@MainActivity,
+                                            forceSelectNearest = true
+                                        )
+                                    },
+                                    onCheckHapticAlert = { remSec ->
+                                        tripViewModel.checkAndTriggerHapticAlert(this@MainActivity, remSec)
+                                    }
+                                )
+                            }
 
-                    Scaffold(
-                        containerColor = Color.Transparent,
-                        bottomBar = {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .navigationBarsPadding()
-                                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(30.dp),
-                                    color = Color(0xF20B132B),
-                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
-                                    shadowElevation = 18.dp,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(68.dp)
-                                        .liquidGlass(
-                                            cornerRadius = 30.dp,
-                                            tintColor = Color(0xFF38BDF8),
-                                            surfaceAlphaTop = 0.35f,
-                                            surfaceAlphaBottom = 0.15f
-                                        )
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(horizontal = 8.dp),
-                                        horizontalArrangement = Arrangement.SpaceEvenly,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        LiquidDockTab(
-                                            selected = currentRoute == "trip",
-                                            onClick = {
-                                                navController.navigate("trip") {
-                                                    popUpTo("trip") { inclusive = false }
-                                                    launchSingleTop = true
-                                                }
-                                            },
-                                            icon = Icons.Default.DirectionsBus,
-                                            label = "Odjezdy"
-                                        )
-                                        LiquidDockTab(
-                                            selected = currentRoute == "map",
-                                            onClick = {
-                                                navController.navigate("map") {
-                                                    popUpTo("trip")
-                                                    launchSingleTop = true
-                                                }
-                                            },
-                                            icon = Icons.Default.Map,
-                                            label = "Živá Mapa"
-                                        )
-                                        LiquidDockTab(
-                                            selected = currentRoute == "lab",
-                                            onClick = {
-                                                navController.navigate("lab") {
-                                                    popUpTo("trip")
-                                                    launchSingleTop = true
-                                                }
-                                            },
-                                            icon = Icons.Default.Science,
-                                            label = "Laboratoř"
+                            AppTab.LIVE_MAP -> {
+                                LiveMapScreen(
+                                    uiState = uiState,
+                                    labSettings = labSettings,
+                                    onRouteFilterChanged = tripViewModel::setMapRouteFilter,
+                                    onSelectStopFromMap = { stop ->
+                                        tripViewModel.selectStop(stop)
+                                        currentTab = AppTab.DEPARTURES
+                                    },
+                                    onRequestGpsLocation = {
+                                        tripViewModel.fetchDeviceLocationAndRecommendStops(
+                                            context = this@MainActivity,
+                                            forceSelectNearest = false
                                         )
                                     }
-                                }
+                                )
+                            }
+
+                            AppTab.LAB -> {
+                                TestingSettingsScreen(
+                                    settings = labSettings,
+                                    repository = labPreferencesRepository
+                                )
                             }
                         }
-                    ) { innerPadding ->
-                        NavHost(
-                            navController = navController,
-                            startDestination = "trip",
-                            modifier = Modifier.padding(top = innerPadding.calculateTopPadding()),
-                            enterTransition = {
-                                fadeIn(animationSpec = tween(320)) + slideInHorizontally(
-                                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
-                                    initialOffsetX = { it / 5 }
-                                )
-                            },
-                            exitTransition = {
-                                fadeOut(animationSpec = tween(220)) + slideOutHorizontally(
-                                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
-                                    targetOffsetX = { -it / 5 }
-                                )
-                            },
-                            popEnterTransition = {
-                                fadeIn(animationSpec = tween(320)) + slideInHorizontally(
-                                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
-                                    initialOffsetX = { -it / 5 }
-                                )
-                            },
-                            popExitTransition = {
-                                fadeOut(animationSpec = tween(220)) + slideOutHorizontally(
-                                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
-                                    targetOffsetX = { it / 5 }
-                                )
-                            }
+
+                        // Spodní navigační lišta
+                        NavigationBar(
+                            containerColor = Color.Transparent,
+                            tonalElevation = 0.dp,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                                .height(74.dp)
+                                .liquidGlassCard(cornerRadius = 28.dp, borderAlpha = 0.25f)
                         ) {
-                            composable("trip") {
-                                TripDashboardScreen(
-                                    viewModel = tripViewModel,
-                                    onNavigateToLab = {
-                                        navController.navigate("lab") {
-                                            popUpTo("trip")
-                                            launchSingleTop = true
-                                        }
-                                    }
+                            NavigationBarItem(
+                                selected = currentTab == AppTab.DEPARTURES,
+                                onClick = { currentTab = AppTab.DEPARTURES },
+                                icon = { Icon(Icons.Default.DirectionsBus, contentDescription = null) },
+                                label = { Text("Odjezdy") },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Color(0xFF38BDF8),
+                                    selectedTextColor = Color(0xFF38BDF8),
+                                    indicatorColor = Color(0xFF0C4A6E).copy(alpha = 0.65f),
+                                    unselectedIconColor = Color(0xFF94A3B8),
+                                    unselectedTextColor = Color(0xFF94A3B8)
                                 )
-                            }
-                            composable("map") {
-                                LiveMapScreen(
-                                    viewModel = tripViewModel,
-                                    onNavigateToLab = {
-                                        navController.navigate("lab") {
-                                            popUpTo("trip")
-                                            launchSingleTop = true
-                                        }
-                                    }
+                            )
+                            NavigationBarItem(
+                                selected = currentTab == AppTab.LIVE_MAP,
+                                onClick = { currentTab = AppTab.LIVE_MAP },
+                                icon = { Icon(Icons.Default.Map, contentDescription = null) },
+                                label = { Text("Živá Mapa") },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Color(0xFF38BDF8),
+                                    selectedTextColor = Color(0xFF38BDF8),
+                                    indicatorColor = Color(0xFF0C4A6E).copy(alpha = 0.65f),
+                                    unselectedIconColor = Color(0xFF94A3B8),
+                                    unselectedTextColor = Color(0xFF94A3B8)
                                 )
-                            }
-                            composable("lab") {
-                                TestingSettingsScreen(
-                                    viewModel = tripViewModel,
-                                    onRequestFloatingPip = { enterFloatingPipCountdownMode() }
+                            )
+                            NavigationBarItem(
+                                selected = currentTab == AppTab.LAB,
+                                onClick = { currentTab = AppTab.LAB },
+                                icon = { Icon(Icons.Default.Science, contentDescription = null) },
+                                label = { Text("Laboratoř") },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Color(0xFF38BDF8),
+                                    selectedTextColor = Color(0xFF38BDF8),
+                                    indicatorColor = Color(0xFF0C4A6E).copy(alpha = 0.65f),
+                                    unselectedIconColor = Color(0xFF94A3B8),
+                                    unselectedTextColor = Color(0xFF94A3B8)
                                 )
-                            }
+                            )
                         }
                     }
                 }
             }
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        val hasTracked = tripViewModel.uiState.value.trackedDeparture != null
+        val pipEnabled = labPreferencesRepository.settings.value.enablePipCountdown
+        if (hasTracked && pipEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val params = PictureInPictureParams.Builder()
+                .setAspectRatio(Rational(16, 9))
+                .build()
+            runCatching { enterPictureInPictureMode(params) }
         }
     }
 
@@ -250,196 +236,6 @@ class MainActivity : ComponentActivity() {
         newConfig: Configuration
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-        _isInPipMode.value = isInPictureInPictureMode
-    }
-
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
-        if (::tripViewModel.isInitialized && tripViewModel.labSettingsFlow.value.floatingPipMiniCountdown) {
-            enterFloatingPipCountdownMode()
-        }
-    }
-
-    private fun enterFloatingPipCountdownMode() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            runCatching {
-                val params = PictureInPictureParams.Builder()
-                    .setAspectRatio(Rational(16, 9))
-                    .build()
-                enterPictureInPictureMode(params)
-            }
-        }
-    }
-
-    private fun applyAggressiveHighRefreshRate(enableAggressive120Hz: Boolean) {
-        if (enableAggressive120Hz) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val highestMode = display?.supportedModes?.maxByOrNull { it.refreshRate }
-                if (highestMode != null) {
-                    val params = window.attributes
-                    params.preferredDisplayModeId = highestMode.modeId
-                    window.attributes = params
-                }
-            }
-        } else {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-    }
-}
-
-@Composable
-private fun PipFloatingCountdownWidget(
-    viewModel: TripViewModel,
-    modifier: Modifier = Modifier
-) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val remainingSec by viewModel.remainingSecondsFlow.collectAsStateWithLifecycle()
-
-    val activeConn = when (val mode = uiState.trackingMode) {
-        is TripTrackingMode.CountingDownToDeparture -> mode.connection
-        is TripTrackingMode.ReachedZeroActionPrompt -> mode.connection
-        is TripTrackingMode.WaitingInNegativeTime -> mode.connection
-        is TripTrackingMode.BoardedCountingToDestination -> mode.connection
-        is TripTrackingMode.MissedConnectionRescue -> mode.nextConnection ?: mode.missedConnection
-        TripTrackingMode.Idle -> uiState.departures.firstOrNull()
-    }
-
-    Surface(
-        modifier = modifier.fillMaxSize(),
-        color = Color(0xFF0F172A)
-    ) {
-        if (activeConn != null) {
-            val isBoarded = uiState.trackingMode is TripTrackingMode.BoardedCountingToDestination
-            val formattedTime = if (remainingSec in -180L..0L && !isBoarded) {
-                if (remainingSec in -45L..0L) "< 1 min" else "PŘÍJEZD"
-            } else {
-                val absSec = abs(remainingSec)
-                val m = absSec / 60
-                val s = absSec % 60
-                String.format("%s%02d:%02d", if (remainingSec < 0) "-" else "", m, s)
-            }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Surface(
-                        color = Color(0xFF2563EB),
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Text(
-                            text = activeConn.routeShortName,
-                            color = Color.White,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 15.sp,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                        )
-                    }
-                    Text(
-                        text = activeConn.headsign,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        maxLines = 1
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                Text(
-                    text = formattedTime,
-                    color = when {
-                        remainingSec in -180L..0L -> Color(0xFF38BDF8)
-                        remainingSec < -180L -> Color(0xFFF87171)
-                        else -> Color(0xFF4ADE80)
-                    },
-                    fontWeight = FontWeight.Black,
-                    fontSize = 30.sp
-                )
-
-                Text(
-                    text = "${activeConn.stopName} • Zpoždění: +${activeConn.totalDelaySeconds} s",
-                    color = Color.White.copy(alpha = 0.75f),
-                    fontSize = 10.sp,
-                    maxLines = 1
-                )
-            }
-        } else {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "PID Golemio Glass",
-                    color = Color(0xFF38BDF8),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RowScope.LiquidDockTab(
-    selected: Boolean,
-    onClick: () -> Unit,
-    icon: ImageVector,
-    label: String
-) {
-    val activeColor = Color(0xFF38BDF8)
-    val inactiveColor = Color.White.copy(alpha = 0.6f)
-    val animatedBg by animateColorAsState(
-        targetValue = if (selected) Color(0xFF0284C7).copy(alpha = 0.28f) else Color.Transparent,
-        animationSpec = spring(stiffness = Spring.StiffnessLow),
-        label = "dockTabBg"
-    )
-
-    val scale by animateFloatAsState(
-        targetValue = if (selected) 1.06f else 1.0f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-        label = "dockTabScale"
-    )
-
-    Box(
-        modifier = Modifier
-            .weight(1f)
-            .fillMaxHeight()
-            .padding(vertical = 6.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(RoundedCornerShape(22.dp))
-            .background(animatedBg)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = if (selected) activeColor else inactiveColor,
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = label,
-                color = if (selected) activeColor else inactiveColor,
-                fontSize = 11.sp,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-            )
-        }
+        isInPipModeState = isInPictureInPictureMode
     }
 }

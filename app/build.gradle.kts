@@ -19,6 +19,10 @@ val mapsKey: String = (localProperties.getProperty("MAPS_API_KEY")
     ?: (project.findProperty("MAPS_API_KEY") as? String)
     ?: System.getenv("MAPS_API_KEY")
     ?: "").trim()
+val golemioKey: String = (localProperties.getProperty("GOLEMIO_API_KEY")
+    ?: (project.findProperty("GOLEMIO_API_KEY") as? String)
+    ?: System.getenv("GOLEMIO_API_KEY")
+    ?: "").trim()
 
 android {
     namespace = "cz.pid.golemiocompanion"
@@ -39,6 +43,7 @@ android {
         buildConfigField("String", "GOLEMIO_BASE_URL", "\"https://api.golemio.cz/\"")
         buildConfigField("String", "PID_IG_BASE_URL", "\"https://api.golemio.cz/pid/input-gateway/\"")
         buildConfigField("String", "MAPS_API_KEY", "\"$mapsKey\"")
+        buildConfigField("String", "GOLEMIO_API_KEY", "\"$golemioKey\"")
 
         manifestPlaceholders["mapsApiKey"] = mapsKey
     }
@@ -105,8 +110,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
-    // Retrofit 2 & Kotlinx Serialization
+    // Retrofit 2 & Kotlinx Serialization / Gson
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
@@ -119,4 +126,7 @@ dependencies {
     implementation("com.google.maps.android:maps-compose:6.1.2")
     implementation("com.google.android.gms:play-services-maps:19.0.0")
     implementation("com.google.android.gms:play-services-location:21.3.0")
+
+    // OSMdroid (OpenStreetMap native renderer)
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
 }

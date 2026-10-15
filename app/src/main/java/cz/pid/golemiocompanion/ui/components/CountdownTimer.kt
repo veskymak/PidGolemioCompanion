@@ -1,506 +1,165 @@
 package cz.pid.golemiocompanion.ui.components
 
-import androidx.compose.animation.*
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.clickable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import cz.pid.golemiocompanion.domain.model.*
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import kotlin.math.abs
-
-private val timeFormatterHHmm: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.of("Europe/Prague"))
+import cz.pid.golemiocompanion.domain.model.DepartureInfo
+import kotlinx.coroutines.delay
 
 @Composable
-fun MeteoAirQualityGlassCard(
-    weatherInfo: AirQualityWeatherInfo,
-    modifier: Modifier = Modifier
-) {
-    val aqiColor = remember(weatherInfo.aqiIndex) {
-        when (weatherInfo.aqiIndex) {
-            1, 2 -> Color(0xFF4ADE80)
-            3 -> Color(0xFFFACC15)
-            else -> Color(0xFFF87171)
-        }
-    }
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .liquidGlass(cornerRadius = 20.dp, tintColor = aqiColor)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Default.Thermostat,
-                contentDescription = "Teplota",
-                tint = Color(0xFF38BDF8),
-                modifier = Modifier.size(26.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Column {
-                Text(
-                    text = "${String.format("%.1f", weatherInfo.temperatureCelsius)} °C",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = weatherInfo.stationName,
-                    color = Color.White.copy(alpha = 0.7f),
-                    fontSize = 11.sp
-                )
-            }
-        }
-
-        Column(horizontalAlignment = Alignment.End) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Air,
-                    contentDescription = "Kvalita ovzduší",
-                    tint = aqiColor,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "Ovzduší: ${weatherInfo.aqiLabelCs}",
-                    color = aqiColor,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 13.sp
-                )
-            }
-            Text(
-                text = "PM10: ${weatherInfo.pm10UgM3} µg/m³ • NO₂: ${weatherInfo.no2UgM3} µg/m³",
-                color = Color.White.copy(alpha = 0.65f),
-                fontSize = 11.sp
-            )
-        }
-    }
-}
-
-sealed interface CountdownDisplayState {
-    data class StatusPhrase(val phrase: String) : CountdownDisplayState
-    data class Time(
-        val isNegative: Boolean,
-        val minutes: String,
-        val seconds: String
-    ) : CountdownDisplayState
-}
-
-@Composable
-fun ActiveTripCountdownGlassPanel(
-    trackingMode: TripTrackingMode,
-    remainingSecondsProvider: () -> Long,
-    onActionStillNotHere: () -> Unit,
-    onActionBoarded: () -> Unit,
-    onActionMissed: () -> Unit,
+fun ActiveCountdownBanner(
+    departure: DepartureInfo,
+    isPipMode: Boolean = false,
     onStopTracking: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val remainingSeconds = remainingSecondsProvider()
+    var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-    val activeConnection: StopConnection? = when (trackingMode) {
-        is TripTrackingMode.CountingDownToDeparture -> trackingMode.connection
-        is TripTrackingMode.ReachedZeroActionPrompt -> trackingMode.connection
-        is TripTrackingMode.WaitingInNegativeTime -> trackingMode.connection
-        is TripTrackingMode.BoardedCountingToDestination -> trackingMode.connection
-        is TripTrackingMode.MissedConnectionRescue -> trackingMode.nextConnection ?: trackingMode.missedConnection
-        TripTrackingMode.Idle -> null
-    }
-
-    if (activeConnection == null) return
-
-    val isBoarded = trackingMode is TripTrackingMode.BoardedCountingToDestination
-    val isWaitingNegative = trackingMode is TripTrackingMode.WaitingInNegativeTime
-
-    val countdownDisplay by remember(remainingSeconds, isBoarded) {
-        derivedStateOf {
-            if (remainingSeconds in -180L..0L && !isBoarded) {
-                val phrase = if (remainingSeconds in -45L..0L) "< 1 min" else "PŘÍJEZD"
-                CountdownDisplayState.StatusPhrase(phrase)
-            } else {
-                val isNegative = remainingSeconds < 0
-                val absSec = abs(remainingSeconds)
-                val mins = absSec / 60
-                val secs = absSec % 60
-                CountdownDisplayState.Time(
-                    isNegative = isNegative,
-                    minutes = String.format("%02d", mins),
-                    seconds = String.format("%02d", secs)
-                )
-            }
+    LaunchedEffect(departure.id) {
+        while (true) {
+            nowMillis = System.currentTimeMillis()
+            delay(250L)
         }
     }
 
-    val showZeroActionCards by remember(trackingMode, remainingSeconds) {
-        derivedStateOf {
-            when (trackingMode) {
-                is TripTrackingMode.ReachedZeroActionPrompt -> true
-                is TripTrackingMode.CountingDownToDeparture -> remainingSeconds < -180L
-                is TripTrackingMode.WaitingInNegativeTime -> true
-                else -> false
-            }
-        }
+    // Přesný rozdíl mezi (JŘ + zpoždění Golemio) a aktuálním časem v sekundách
+    val remainingSec = ((departure.exactDepartureEpochMillis - nowMillis) / 1000L).coerceAtLeast(0L)
+    val minutes = remainingSec / 60L
+    val seconds = remainingSec % 60L
+
+    val formattedCountdown = String.format("%02d:%02d", minutes, seconds)
+    val urgencyColor = when {
+        remainingSec <= 60 -> Color(0xFFFF5252)
+        remainingSec <= 180 -> Color(0xFFFFB74D)
+        else -> Color(0xFF38BDF8)
     }
 
-    val pulseScale by animateFloatAsState(
-        targetValue = if (remainingSeconds in 0..10 && !isBoarded) 1.04f else 1.0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "120HzCountdownScale"
+    val progressTarget = (remainingSec.toFloat() / 900f).coerceIn(0f, 1f)
+    val animatedProgress by animateFloatAsState(
+        targetValue = progressTarget,
+        animationSpec = tween(durationMillis = 250),
+        label = "countdown_progress"
     )
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .liquidGlass(
-                cornerRadius = 28.dp,
-                tintColor = when {
-                    isBoarded -> Color(0xFF34D399)
-                    remainingSeconds in -180L..0L -> Color(0xFF38BDF8)
-                    isWaitingNegative -> Color(0xFFFBBF24)
-                    remainingSeconds < -180L -> Color(0xFFF87171)
-                    else -> Color(0xFF60A5FA)
-                }
-            )
-            .padding(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    color = Color(0xFF2563EB),
-                    shape = MaterialTheme.shapes.medium
-                ) {
-                    Text(
-                        text = activeConnection.routeShortName,
-                        color = Color.White,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 20.sp,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = activeConnection.headsign,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
-                    )
-                    Text(
-                        text = "${activeConnection.stopName} • Nástupiště ${activeConnection.platformCode}",
-                        color = Color.White.copy(alpha = 0.75f),
-                        fontSize = 12.sp
-                    )
-                }
-            }
-
-            IconButton(onClick = onStopTracking) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Ukončit sledování",
-                    tint = Color.White.copy(alpha = 0.8f)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = when {
-                isBoarded -> "JÍZDA V SPOJI • ODPOČET DO CÍLOVÉ STANICE"
-                isWaitingNegative -> "REŽIM ČEKÁNÍ NA SPOJ (ČEKÁM NA AKTUALIZACI DELAY Z GOLEMIO API)"
-                remainingSeconds in -180L..0L -> "SPOJ PŘIJÍŽDÍ NA ZASTÁVKU"
-                remainingSeconds < -180L -> "SPOJ BY MĚL BÝT NA ZASTÁVCE"
-                else -> "ODJEZD ZE ZASTÁVKY ZA"
-            },
-            color = Color(0xFF93C5FD),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        val timerColor = when {
-            isWaitingNegative -> Color(0xFFFBBF24)
-            isBoarded -> Color(0xFF4ADE80)
-            remainingSeconds in -180L..0L -> Color(0xFF38BDF8)
-            remainingSeconds < -180L -> Color(0xFFF87171)
-            else -> Color.White
-        }
-
-        Box(
-            modifier = Modifier.graphicsLayer {
-                scaleX = pulseScale
-                scaleY = pulseScale
-            },
-            contentAlignment = Alignment.Center
-        ) {
-            when (val display = countdownDisplay) {
-                is CountdownDisplayState.StatusPhrase -> {
-                    AnimatedContent(
-                        targetState = display.phrase,
-                        transitionSpec = {
-                            (slideInVertically(
-                                animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioNoBouncy,
-                                    stiffness = Spring.StiffnessMediumLow
-                                )
-                            ) { height -> height / 3 } + fadeIn()).togetherWith(
-                                slideOutVertically(
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioNoBouncy,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
-                                ) { height -> -height / 3 } + fadeOut()
-                            )
-                        },
-                        label = "StatusPhraseTicker"
-                    ) { targetText ->
-                        Text(
-                            text = targetText,
-                            color = timerColor,
-                            fontSize = 42.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-                is CountdownDisplayState.Time -> {
-                    val fontSize = if (display.minutes.length > 2) 52.sp else 64.sp
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        if (display.isNegative) {
-                            Text(
-                                text = "-",
-                                color = timerColor,
-                                fontSize = fontSize,
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-
-                        // Minuty se animují POUZE když se změní hodnota minut
-                        AnimatedContent(
-                            targetState = display.minutes,
-                            transitionSpec = {
-                                (slideInVertically(
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioNoBouncy,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
-                                ) { height -> height / 3 } + fadeIn()).togetherWith(
-                                    slideOutVertically(
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioNoBouncy,
-                                            stiffness = Spring.StiffnessMediumLow
-                                        )
-                                    ) { height -> -height / 3 } + fadeOut()
-                                )
-                            },
-                            contentAlignment = Alignment.Center,
-                            label = "MinutesTicker"
-                        ) { minText ->
-                            Text(
-                                text = minText,
-                                color = timerColor,
-                                fontSize = fontSize,
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-
-                        // Dvojtečka je statická – zůstává pevně na místě a nehýbe se každou vteřinu
-                        Text(
-                            text = ":",
-                            color = timerColor,
-                            fontSize = fontSize,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace
-                        )
-
-                        // Vteřiny se animují každou vteřinu
-                        AnimatedContent(
-                            targetState = display.seconds,
-                            transitionSpec = {
-                                (slideInVertically(
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioNoBouncy,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
-                                ) { height -> height / 3 } + fadeIn()).togetherWith(
-                                    slideOutVertically(
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioNoBouncy,
-                                            stiffness = Spring.StiffnessMediumLow
-                                        )
-                                    ) { height -> -height / 3 } + fadeOut()
-                                )
-                            },
-                            contentAlignment = Alignment.Center,
-                            label = "SecondsTicker"
-                        ) { secText ->
-                            Text(
-                                text = secText,
-                                color = timerColor,
-                                fontSize = fontSize,
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        val delaySec = activeConnection.totalDelaySeconds
-        val arrivalHHmm = remember(activeConnection.effectiveDestinationArrivalEpochMs) {
-            timeFormatterHHmm.format(Instant.ofEpochMilli(activeConnection.effectiveDestinationArrivalEpochMs))
-        }
-
-        if (isBoarded) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "Cíl: ${activeConnection.destinationName} • Plánovaný příjezd v $arrivalHHmm",
-                color = Color(0xFF86EFAC),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        } else {
-            Spacer(modifier = Modifier.height(4.dp))
-            val delayText = if (delaySec <= 0) {
-                "Bez zpoždění (přesně dle JŘ)"
-            } else {
-                val aiNote = if (activeConnection.phantomAiExtraDelaySeconds > 0) {
-                    " (vč. +${activeConnection.phantomAiExtraDelaySeconds}s AI heuristiky)"
-                } else ""
-                "Aktuální zpoždění: +${delaySec} s$aiNote"
-            }
-            Text(
-                text = delayText,
-                color = if (delaySec > 60) Color(0xFFFCA5A5) else Color.White.copy(alpha = 0.8f),
-                fontSize = 13.sp
-            )
-        }
-
-        AnimatedVisibility(
-            visible = showZeroActionCards,
-            enter = expandVertically(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioLowBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                )
-            ) + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
+    if (isPipMode) {
+        Surface(
+            color = Color(0xFF0F172A),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxSize()
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .fillMaxSize()
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Jaká je situace na zastávce?",
+                    text = "Linka ${departure.routeShortName} • ${departure.headsign}",
                     color = Color.White,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
+                    maxLines = 1
                 )
-
-                ActionZeroGlassCard(
-                    title = "Ještě tu není",
-                    subtitle = "Přejít do záporného odpočtu a čekat na aktualizovaný delay z API",
-                    icon = Icons.Default.HourglassBottom,
-                    accentColor = Color(0xFFFBBF24),
-                    onClick = onActionStillNotHere
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = formattedCountdown,
+                    color = urgencyColor,
+                    fontSize = 28.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.ExtraBold
                 )
-
-                ActionZeroGlassCard(
-                    title = "Nastoupil/a jsem",
-                    subtitle = "Přepnout na odpočet do cílové stanice (příjezd v $arrivalHHmm)",
-                    icon = Icons.Default.DirectionsBus,
-                    accentColor = Color(0xFF34D399),
-                    onClick = onActionBoarded
-                )
-
-                ActionZeroGlassCard(
-                    title = "Ujel mi",
-                    subtitle = "Najít další spoj, sdílená kola (Nextbike/Rekola) a krizové přestupy",
-                    icon = Icons.Default.DirectionsBike,
-                    accentColor = Color(0xFFF87171),
-                    onClick = onActionMissed
+                Text(
+                    text = "JŘ ${departure.scheduledTimeFormatted} (${formatDelayLabel(departure.delaySeconds, departure.isDelayAvailable)})",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 10.sp
                 )
             }
+        }
+        return
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .liquidGlassCard(cornerRadius = 20.dp, borderAlpha = 0.28f)
+            .padding(16.dp)
+    ) {
+        Column {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "AKTIVNÍ ODPOČET (JŘ + GOLEMIO)",
+                        color = urgencyColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Linka ${departure.routeShortName} → ${departure.headsign}",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "JŘ ${departure.scheduledTimeFormatted} • Zpoždění ${formatDelayLabel(departure.delaySeconds, departure.isDelayAvailable)} • Odjezd v ${departure.exactDepartureTimeFormatted}",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 12.sp
+                    )
+                }
+
+                Text(
+                    text = formattedCountdown,
+                    color = urgencyColor,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+
+                IconButton(onClick = onStopTracking) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Zrušit odpočet",
+                        tint = Color(0xFF94A3B8)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            LinearProgressIndicator(
+                progress = { animatedProgress },
+                color = urgencyColor,
+                trackColor = Color(0xFF334155),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(5.dp)
+            )
         }
     }
 }
 
-@Composable
-private fun ActionZeroGlassCard(
-    title: String,
-    subtitle: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    accentColor: Color,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .liquidGlass(cornerRadius = 18.dp, tintColor = accentColor, surfaceAlphaTop = 0.22f)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = title,
-            tint = accentColor,
-            modifier = Modifier.size(28.dp)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp
-            )
-            Text(
-                text = subtitle,
-                color = Color.White.copy(alpha = 0.78f),
-                fontSize = 12.sp
-            )
-        }
-        Icon(
-            imageVector = Icons.Default.ChevronRight,
-            contentDescription = null,
-            tint = Color.White.copy(alpha = 0.7f)
-        )
+fun formatDelayLabel(delaySeconds: Int, isDelayAvailable: Boolean): String {
+    if (!isDelayAvailable) return "dle JŘ"
+    return when {
+        delaySeconds == 0 -> "včas"
+        delaySeconds > 0 -> "+${delaySeconds}s"
+        else -> "${delaySeconds}s"
     }
 }

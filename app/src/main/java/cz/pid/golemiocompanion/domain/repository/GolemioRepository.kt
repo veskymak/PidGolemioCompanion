@@ -1,40 +1,14 @@
 package cz.pid.golemiocompanion.domain.repository
 
-import cz.pid.golemiocompanion.domain.model.*
+import cz.pid.golemiocompanion.domain.model.DepartureInfo
+import cz.pid.golemiocompanion.domain.model.LiveVehiclePosition
+import cz.pid.golemiocompanion.domain.model.ParkingLotInfo
+import cz.pid.golemiocompanion.domain.model.PidStop
+import cz.pid.golemiocompanion.domain.model.SharedBikeInfo
 
 interface GolemioRepository {
-    suspend fun getDeparturesForStop(
-        stopQuery: String,
-        lineFilter: String?,
-        labSettings: LabSettingsState,
-        currentWeather: AirQualityWeatherInfo?
-    ): List<StopConnection>
-
-    suspend fun getAirQualityAndWeather(
-        lat: Double,
-        lon: Double,
-        apiKey: String
-    ): AirQualityWeatherInfo
-
-    suspend fun getNearbySharedBikes(
-        lat: Double,
-        lon: Double,
-        apiKey: String
-    ): List<SharedBikeStation>
-
-    suspend fun getEmergencyTransfersWithin600m(
-        originLat: Double,
-        originLon: Double,
-        targetDestination: String,
-        excludedLine: String,
-        apiKey: String
-    ): List<EmergencyTransferOption>
-
-    suspend fun getLiveVehicles(
-        lineFilter: String?,
-        labSettings: LabSettingsState
-    ): List<LiveVehicleMarker>
-
-    suspend fun getParkingsPR(apiKey: String): List<ParkingLotPR>
-    suspend fun getVehicleUpcomingStops(vehicle: LiveVehicleMarker, apiKey: String): List<VehicleUpcomingStop>
+    suspend fun getDeparturesForStop(stop: PidStop): Result<List<DepartureInfo>>
+    suspend fun getLiveVehicles(routeFilter: String? = null): Result<List<LiveVehiclePosition>>
+    suspend fun getParkingLots(): Result<List<ParkingLotInfo>>
+    suspend fun getSharedBikes(): Result<List<SharedBikeInfo>>
 }

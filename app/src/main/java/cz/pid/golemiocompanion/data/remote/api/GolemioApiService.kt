@@ -1,67 +1,46 @@
 package cz.pid.golemiocompanion.data.remote.api
 
-import cz.pid.golemiocompanion.data.remote.dto.*
+import cz.pid.golemiocompanion.data.remote.dto.DepartureBoardResponseDto
+import cz.pid.golemiocompanion.data.remote.dto.ParkingLotsGeoJsonDto
+import cz.pid.golemiocompanion.data.remote.dto.SharedBikesGeoJsonDto
+import cz.pid.golemiocompanion.data.remote.dto.VehiclePositionsGeoJsonDto
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.Query
 
 interface GolemioApiService {
 
+    /**
+     * minutesBefore = 0 zamezí Golemiu posílat staré odjezdy za posledních 30 minut.
+     */
     @GET("v2/pid/departureboards")
-    suspend fun getDepartureBoards(
+    suspend fun getDepartureBoard(
         @Header("X-Access-Token") apiKey: String,
-        @Query("names") stopName: String? = null,
-        @Query("ids") stopId: String? = null,
-        @Query("minutesBefore") minutesBefore: Int = 10,
-        @Query("minutesAfter") minutesAfter: Int = 720,
-        @Query("includeMetroTrains") includeMetroTrains: Boolean = true,
-        @Query("airCondition") airCondition: Boolean = true,
+        @Query("names") stopNames: List<String>,
+        @Query("minutesBefore") minutesBefore: Int = 0,
+        @Query("minutesAfter") minutesAfter: Int = 180,
+        @Query("limit") limit: Int = 35,
         @Query("preferredTimezone") preferredTimezone: String = "Europe/Prague",
-        @Query("order") order: String = "real",
-        @Query("limit") limit: Int = 50
-    ): PidDepartureBoardResponseDto
+        @Query("mode") mode: String = "departures",
+        @Query("order") order: String = "real"
+    ): DepartureBoardResponseDto
 
     @GET("v2/vehiclepositions")
     suspend fun getVehiclePositions(
         @Header("X-Access-Token") apiKey: String,
-        @Query("routeShortName") routeShortName: String? = null,
-        @Query("includeNotTracking") includeNotTracking: Boolean = true,
-        @Query("limit") limit: Int = 2500
+        @Query("limit") limit: Int = 1200,
+        @Query("routeShortName") routeShortName: String? = null
     ): VehiclePositionsGeoJsonDto
 
-    @GET("v2/gtfs/trips/{id}")
-    suspend fun getTripDetails(
+    @GET("v1/parkings")
+    suspend fun getParkingLots(
         @Header("X-Access-Token") apiKey: String,
-        @retrofit2.http.Path("id") tripId: String,
-        @Query("includeStops") includeStops: Boolean = true,
-        @Query("includeStopTimes") includeStopTimes: Boolean = true
-    ): GtfsTripDetailDto
+        @Query("limit") limit: Int = 100
+    ): ParkingLotsGeoJsonDto
 
-    @GET("pid/input-gateway/v1/vehiclepositions/raw")
-    suspend fun getRawTelemetryStream(
-        @Header("X-Access-Token") apiKey: String,
-        @Query("routeShortName") routeShortName: String? = null
-    ): List<PidInputGatewayTelemetryDto>
-
-    @GET("v2/sharedbikes")
+    @GET("v1/sharedbikes")
     suspend fun getSharedBikes(
         @Header("X-Access-Token") apiKey: String,
-        @Query("latlng") latLng: String? = null,
-        @Query("range") rangeMeters: Int = 650,
-        @Query("limit") limit: Int = 30
+        @Query("limit") limit: Int = 150
     ): SharedBikesGeoJsonDto
-
-    @GET("v2/parkings")
-    suspend fun getParkingsPR(
-        @Header("X-Access-Token") apiKey: String,
-        @Query("limit") limit: Int = 50
-    ): ParkingsGeoJsonDto
-
-    @GET("v2/airqualitystations")
-    suspend fun getAirQualityStations(
-        @Header("X-Access-Token") apiKey: String,
-        @Query("latlng") latLng: String? = null,
-        @Query("range") rangeMeters: Int = 5000,
-        @Query("limit") limit: Int = 5
-    ): AirQualityGeoJsonDto
 }
