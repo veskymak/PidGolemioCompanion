@@ -10,6 +10,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,12 +28,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.input.pointer.pointerInput
 import java.time.OffsetDateTime
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -128,6 +131,7 @@ fun LiveMapScreen(
     onRouteFilterChanged: (String) -> Unit,
     onSelectStopFromMap: (PidStop) -> Unit,
     onRequestGpsLocation: () -> Unit,
+    onSaveMapPosition: (Double, Double, Double) -> Unit = { _, _, _ -> },
     onTrackVehicle: (String, String, Long) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
@@ -150,6 +154,7 @@ fun LiveMapScreen(
     var showParking by remember { mutableStateOf(false) }
     var showBikes by remember { mutableStateOf(false) }
     var selectedVehicle by remember { mutableStateOf<LiveVehiclePosition?>(null) }
+    var selectedRouteRoadPoints by remember { mutableStateOf<List<GeoPoint>>(emptyList()) }
 
     // Dialog / Bottom Sheet filtrů přesně podle PID Lítačky
     var showFilterSheet by remember { mutableStateOf(false) }
@@ -162,7 +167,7 @@ fun LiveMapScreen(
         true
     }
 
-    var currentZoomLevel by remember { mutableDoubleStateOf(14.0) }
+    var currentZoomLevel by remember { mutableDoubleStateOf(uiState.mapZoomLevel) }
 
     val mapView = remember {
         MapView(context).apply {
@@ -173,47 +178,92 @@ fun LiveMapScreen(
             setTileSource(createCartoTileSource(labSettings.cartoApiKey))
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
-            controller.setZoom(14.0)
-            controller.setCenter(
-                GeoPoint(uiState.selectedStop.latitude, uiState.selectedStop.longitude)
-            )
+            val initialZoom = uiState.mapZoomLevel
+            val initialLat = uiState.mapCenterLat ?: uiState.selectedStop.latitude
+            val initialLon = uiState.mapCenterLon ?: uiState.selectedStop.longitude
+            controller.setZoom(initialZoom)
+            controller.setCenter(GeoPoint(initialLat, initialLon))
             addMapListener(object : MapListener {
-                override fun onScroll(event: ScrollEvent?): Boolean = false
+                override fun onScroll(event: ScrollEvent?): Boolean {
+                    mapCenter?.let { center ->
+                        onSaveMapPosition(center.latitude, center.longitude, zoomLevelDouble)
+                    }
+                    return false
+                }
                 override fun onZoom(event: ZoomEvent?): Boolean {
                     currentZoomLevel = zoomLevelDouble
+                    mapCenter?.let { center ->
+                        onSaveMapPosition(center.latitude, center.longitude, zoomLevelDouble)
+                    }
                     return false
                 }
             })
         }
     }
 
-    // Automatické přicestování na hledanou linku při zadání filtru (např. 345, 715)
+    // Načtení silniční geometrie trasy vybraného vozidla (OSRM)
+    LaunchedEffect(selectedVehicle?.id) {
+        val veh = selectedVehicle
+        if (veh != null) {
+            val stops = getRouteStopsForVehicle(veh)
+            val waypoints = stops.map { it.geoPoint }
+            val cached = RoadRouteHelper.getCachedRoute(waypoints)
+            if (cached != null) {
+                selectedRouteRoadPoints = cached
+                mapView.invalidate()
+            } else {
+                selectedRouteRoadPoints = waypoints
+                mapView.invalidate()
+                val roadPts = RoadRouteHelper.fetchRoadRoute(waypoints)
+                selectedRouteRoadPoints = roadPts
+                mapView.invalidate()
+            }
+        } else {
+            selectedRouteRoadPoints = emptyList()
+            mapView.invalidate()
+        }
+    }
+
+    var lastAnimatedRouteFilter by remember { mutableStateOf(uiState.mapRouteFilter.trim()) }
+
+    // Automatické přicestování na hledanou linku při změně filtru (např. 345, 715)
     LaunchedEffect(uiState.mapRouteFilter, uiState.liveVehicles) {
         val filter = uiState.mapRouteFilter.trim()
-        if (filter.isNotEmpty()) {
+        if (filter.isNotEmpty() && filter != lastAnimatedRouteFilter) {
             val matched = uiState.liveVehicles.firstOrNull {
                 it.routeShortName.equals(filter, ignoreCase = true)
             } ?: uiState.liveVehicles.firstOrNull {
                 it.routeShortName.contains(filter, ignoreCase = true)
             }
             if (matched != null) {
+                lastAnimatedRouteFilter = filter
                 mapView.controller.animateTo(GeoPoint(matched.latitude, matched.longitude), 14.5, 600L)
             }
+        } else if (filter.isEmpty()) {
+            lastAnimatedRouteFilter = ""
         }
     }
 
-    // Napojení MapView na životní cyklus
+    // Napojení MapView na životní cyklus a uložení pozice při přepnutí záložky
     DisposableEffect(lifecycleOwner, mapView) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                Lifecycle.Event.ON_PAUSE -> {
+                    mapView.mapCenter?.let { center ->
+                        onSaveMapPosition(center.latitude, center.longitude, mapView.zoomLevelDouble)
+                    }
+                    mapView.onPause()
+                }
                 else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         mapView.onResume()
         onDispose {
+            mapView.mapCenter?.let { center ->
+                onSaveMapPosition(center.latitude, center.longitude, mapView.zoomLevelDouble)
+            }
             lifecycleOwner.lifecycle.removeObserver(observer)
             mapView.onPause()
         }
@@ -249,15 +299,22 @@ fun LiveMapScreen(
                     if (mapDisplayMode == MapDisplayMode.MAPA_PID_WEB) return@AndroidView
                     map.overlays.clear()
 
-                    // Vykreslení trasy vybraného vozidla (modrá linka jako v Lítačce)
+                    // Vykreslení trasy vybraného vozidla po reálné silnici (modrá linka jako v Lítačce)
                     selectedVehicle?.let { vehicle ->
                         val routeStops = getRouteStopsForVehicle(vehicle)
-                        if (routeStops.size >= 2) {
+                        val pts = if (selectedRouteRoadPoints.size >= 2) {
+                            selectedRouteRoadPoints
+                        } else {
+                            routeStops.map { it.geoPoint }
+                        }
+                        if (pts.size >= 2) {
                             val polyline = Polyline().apply {
                                 outlinePaint.color = 0xFF0284C7.toInt()
-                                outlinePaint.strokeWidth = 8f
+                                outlinePaint.strokeWidth = 9f
                                 outlinePaint.strokeCap = Paint.Cap.ROUND
-                                setPoints(routeStops.map { it.geoPoint })
+                                outlinePaint.strokeJoin = Paint.Join.ROUND
+                                outlinePaint.style = Paint.Style.STROKE
+                                setPoints(pts)
                             }
                             map.overlays.add(polyline)
                         }
@@ -692,9 +749,12 @@ fun LiveMapScreen(
             )
         }
 
-        // Detail a kompletní skrolovatelná trasa se zastávkami (podle screenshotu 4 z Lítačky)
-        selectedVehicle?.let { vehicle ->
+        // Detail vozidla s plynulým tažením (2 otevřené polohy: Kompaktní = pouze info + zpoždění, Rozbalená = kompletní trasa, a stažení dolů = zavřít)
+        selectedVehicle?.let { rawVehicle ->
+            val vehicle = uiState.liveVehicles.firstOrNull { it.id == rawVehicle.id } ?: rawVehicle
             val routeStops = remember(vehicle.id) { getRouteStopsForVehicle(vehicle) }
+            var isPopupExpanded by remember(vehicle.id) { mutableStateOf(true) }
+            var popupDragOffsetPx by remember(vehicle.id, isPopupExpanded) { mutableFloatStateOf(0f) }
 
             Surface(
                 color = Color.White,
@@ -702,236 +762,320 @@ fun LiveMapScreen(
                 shadowElevation = 16.dp,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
+                    .offset { IntOffset(0, popupDragOffsetPx.roundToInt()) }
                     .fillMaxWidth()
-                    .fillMaxHeight(0.60f)
+                    .then(
+                        if (isPopupExpanded) Modifier.fillMaxHeight(0.62f)
+                        else Modifier.wrapContentHeight()
+                    )
                     .navigationBarsPadding()
             ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    // Horní madlo pro potažení
-                    Box(
+                Column(
+                    modifier = if (isPopupExpanded) Modifier.fillMaxSize() else Modifier.fillMaxWidth()
+                ) {
+                    // Horní sekce (madlo + info o spoji + aktuální zpoždění) s gestem tažení nahoru/dolů
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        contentAlignment = Alignment.Center
+                            .pointerInput(vehicle.id, isPopupExpanded) {
+                                detectVerticalDragGestures(
+                                    onDragEnd = {
+                                        if (isPopupExpanded) {
+                                            when {
+                                                // Velké potažení dolů -> rovnou zavřít
+                                                popupDragOffsetPx > 210.dp.toPx() -> {
+                                                    popupDragOffsetPx = 0f
+                                                    selectedVehicle = null
+                                                }
+                                                // Střední potažení dolů -> přepnout do kompaktní polohy (pouze info + zpoždění)
+                                                popupDragOffsetPx > 42.dp.toPx() -> {
+                                                    popupDragOffsetPx = 0f
+                                                    isPopupExpanded = false
+                                                }
+                                                else -> {
+                                                    popupDragOffsetPx = 0f
+                                                }
+                                            }
+                                        } else {
+                                            when {
+                                                // Potažení dolů z kompaktní polohy -> zavřít okno
+                                                popupDragOffsetPx > 38.dp.toPx() -> {
+                                                    popupDragOffsetPx = 0f
+                                                    selectedVehicle = null
+                                                }
+                                                // Potažení nahoru z kompaktní polohy -> rozbalit celou trasu
+                                                popupDragOffsetPx < -38.dp.toPx() -> {
+                                                    popupDragOffsetPx = 0f
+                                                    isPopupExpanded = true
+                                                }
+                                                else -> {
+                                                    popupDragOffsetPx = 0f
+                                                }
+                                            }
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        popupDragOffsetPx = 0f
+                                    },
+                                    onVerticalDrag = { change, dragAmount ->
+                                        change.consume()
+                                        popupDragOffsetPx = if (isPopupExpanded) {
+                                            (popupDragOffsetPx + dragAmount).coerceAtLeast(-24f)
+                                        } else {
+                                            popupDragOffsetPx + dragAmount
+                                        }
+                                    }
+                                )
+                            }
                     ) {
+                        // Horní madlo pro potažení (klepnutím lze také přepnout kompaktní/rozbalený stav)
                         Box(
                             modifier = Modifier
-                                .width(36.dp)
-                                .height(4.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(Color(0xFFCBD5E1))
-                        )
-                    }
-
-                    // Záhlaví: Ikona, Typ linky, Číslo, Směr a tlačítko zavřít (jako v Lítačce)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                color = when (vehicle.vehicleType) {
-                                    VehicleType.TRAM -> Color(0xFFC8102E)
-                                    VehicleType.TRAIN -> Color(0xFF2B3990)
-                                    else -> Color(0xFF0078A8)
-                                },
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (vehicle.vehicleType == VehicleType.TRAIN) Icons.Default.DirectionsRailway else Icons.Default.DirectionsBus,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier
-                                        .padding(8.dp)
-                                        .size(24.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "${if (vehicle.vehicleType == VehicleType.TRAIN) "Vlak" else "Autobus"} ${vehicle.routeShortName}",
-                                        fontSize = 17.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF0F172A)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(text = "♿ ❄️", fontSize = 13.sp)
-                                }
-                                Text(
-                                    text = "směr ${vehicle.headsign}",
-                                    fontSize = 13.sp,
-                                    color = Color(0xFF64748B)
-                                )
-                            }
-                        }
-
-                        IconButton(onClick = { selectedVehicle = null }) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Zavřít",
-                                tint = Color(0xFF64748B)
-                            )
-                        }
-                    }
-
-                    // Zpoždění banner (oranžový pruh s tečkou)
-                    val delayMin = (vehicle.delaySeconds / 60)
-                    Surface(
-                        color = if (vehicle.delaySeconds <= 60) Color(0xFFDCFCE7) else Color(0xFFFEF3C7),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                .fillMaxWidth()
+                                .clickable { isPopupExpanded = !isPopupExpanded }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(if (vehicle.delaySeconds <= 60) Color(0xFF16A34A) else Color(0xFFD97706))
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (vehicle.isInactive) {
-                                    "Vozidlo nemá aktivní GPS sledování"
-                                } else if (vehicle.delaySeconds <= 60) {
-                                    "Včas (zpoždění do 1 min)"
-                                } else {
-                                    "Aktuální zpoždění $delayMin min"
-                                },
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (vehicle.delaySeconds <= 60) Color(0xFF16A34A) else Color(0xFFB45309)
+                                    .width(42.dp)
+                                    .height(5.dp)
+                                    .clip(RoundedCornerShape(2.5.dp))
+                                    .background(Color(0xFF94A3B8))
                             )
                         }
-                    }
 
-                    // Tlačítko pro okamžité sledování spoje v ostrůvku / notifikaci
-                    Surface(
-                        onClick = {
-                            val targetMillis = System.currentTimeMillis() + 6 * 60 * 1000L
-                            onTrackVehicle(vehicle.routeShortName, vehicle.headsign, targetMillis)
-                        },
-                        color = Color(0xFF0284C7),
-                        shape = RoundedCornerShape(10.dp),
-                        shadowElevation = 2.dp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                    ) {
+                        // Záhlaví: Ikona, Typ linky, Číslo, Směr a tlačítko zavřít (jako v Lítačce)
                         Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.padding(vertical = 8.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.NotificationsActive,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Sledovat spoj v notifikaci",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    // Skrolovatelný seznam všech zastávek na trase spoje (Screenshot 4)
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .padding(horizontal = 16.dp, vertical = 6.dp)
-                    ) {
-                        items(routeStops) { stop ->
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
                             ) {
-                                // Časy (vlevo předpokládaný, vedle jízdní řád)
-                                Text(
-                                    text = stop.predictedTime,
-                                    fontSize = 13.sp,
-                                    fontWeight = if (stop.isCurrentOrNext) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (stop.isCurrentOrNext) Color(0xFFDC2626) else if (stop.isVisited) Color(0xFF94A3B8) else Color(0xFF0F172A),
-                                    modifier = Modifier.width(44.dp)
-                                )
-
-                                // Vertikální vodící čára s tečkou
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier.width(24.dp)
+                                Surface(
+                                    color = when (vehicle.vehicleType) {
+                                        VehicleType.TRAM -> Color(0xFFC8102E)
+                                        VehicleType.TRAIN -> Color(0xFF2B3990)
+                                        else -> Color(0xFF0078A8)
+                                    },
+                                    shape = RoundedCornerShape(8.dp)
                                 ) {
-                                    Box(
+                                    Icon(
+                                        imageVector = if (vehicle.vehicleType == VehicleType.TRAIN) Icons.Default.DirectionsRailway else Icons.Default.DirectionsBus,
+                                        contentDescription = null,
+                                        tint = Color.White,
                                         modifier = Modifier
-                                            .size(9.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                if (stop.isCurrentOrNext) Color(0xFF0284C7)
-                                                else if (stop.isVisited) Color(0xFFCBD5E1)
-                                                else Color(0xFF0284C7)
-                                            )
+                                            .padding(8.dp)
+                                            .size(24.dp)
                                     )
                                 }
 
-                                Text(
-                                    text = stop.scheduledTime,
-                                    fontSize = 12.sp,
-                                    color = Color(0xFF94A3B8),
-                                    modifier = Modifier.width(44.dp)
-                                )
+                                Spacer(modifier = Modifier.width(12.dp))
 
-                                Spacer(modifier = Modifier.width(6.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        val typeName = when (vehicle.vehicleType) {
+                                            VehicleType.TRAIN -> "Vlak"
+                                            VehicleType.TRAM -> "Tramvaj"
+                                            VehicleType.TROLLEYBUS -> "Trolejbus"
+                                            VehicleType.METRO -> "Metro"
+                                            VehicleType.FERRY -> "Přívoz"
+                                            VehicleType.BUS -> "Autobus"
+                                        }
+                                        Text(
+                                            text = "$typeName ${vehicle.routeShortName}",
+                                            fontSize = 17.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF0F172A)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(text = "♿ ❄️", fontSize = 13.sp)
+                                    }
                                     Text(
-                                        text = stop.stopName,
-                                        fontSize = 14.sp,
-                                        fontWeight = if (stop.isCurrentOrNext) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (stop.isVisited) Color(0xFF94A3B8) else Color(0xFF0F172A)
-                                    )
-                                    Text(
-                                        text = stop.zone,
-                                        fontSize = 11.sp,
+                                        text = "směr ${vehicle.headsign}",
+                                        fontSize = 13.sp,
                                         color = Color(0xFF64748B)
                                     )
                                 }
                             }
+
+                            IconButton(onClick = { selectedVehicle = null }) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Zavřít",
+                                    tint = Color(0xFF64748B)
+                                )
+                            }
+                        }
+
+                        // Zpoždění banner (zelený/oranžový pruh s tečkou)
+                        val delayMin = (vehicle.delaySeconds / 60)
+                        Surface(
+                            color = if (vehicle.delaySeconds <= 60) Color(0xFFDCFCE7) else Color(0xFFFEF3C7),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(if (vehicle.delaySeconds <= 60) Color(0xFF16A34A) else Color(0xFFD97706))
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = if (vehicle.isInactive) {
+                                            "Vozidlo nemá aktivní GPS sledování"
+                                        } else if (vehicle.delaySeconds <= 60) {
+                                            "Včas (zpoždění do 1 min)"
+                                        } else {
+                                            "Aktuální zpoždění $delayMin min"
+                                        },
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (vehicle.delaySeconds <= 60) Color(0xFF16A34A) else Color(0xFFB45309)
+                                    )
+                                }
+                            }
                         }
                     }
 
-                    // Tlačítko pro vyfiltrování pouze této linky
-                    Button(
-                        onClick = {
-                            onRouteFilterChanged(vehicle.routeShortName)
-                            selectedVehicle = null
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF281147)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp)
-                    ) {
-                        Text(
-                            text = "Filtrovat jen linku ${vehicle.routeShortName} na mapě",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                    if (isPopupExpanded) {
+                        // Tlačítko pro okamžité sledování spoje v ostrůvku / notifikaci
+                        Surface(
+                            onClick = {
+                                val targetMillis = System.currentTimeMillis() + 6 * 60 * 1000L
+                                onTrackVehicle(vehicle.routeShortName, vehicle.headsign, targetMillis)
+                            },
+                            color = Color(0xFF0284C7),
+                            shape = RoundedCornerShape(10.dp),
+                            shadowElevation = 2.dp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Sledovat spoj v notifikaci",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // Skrolovatelný seznam všech zastávek na trase spoje (Screenshot 4)
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                        ) {
+                            items(routeStops) { stop ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Časy (vlevo předpokládaný, vedle jízdní řád)
+                                    Text(
+                                        text = stop.predictedTime,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (stop.isCurrentOrNext) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (stop.isCurrentOrNext) Color(0xFFDC2626) else if (stop.isVisited) Color(0xFF94A3B8) else Color(0xFF0F172A),
+                                        modifier = Modifier.width(44.dp)
+                                    )
+
+                                    // Vertikální vodící čára s tečkou
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.width(24.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(9.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    if (stop.isCurrentOrNext) Color(0xFF0284C7)
+                                                    else if (stop.isVisited) Color(0xFFCBD5E1)
+                                                    else Color(0xFF0284C7)
+                                                )
+                                        )
+                                    }
+
+                                    Text(
+                                        text = stop.scheduledTime,
+                                        fontSize = 12.sp,
+                                        color = Color(0xFF94A3B8),
+                                        modifier = Modifier.width(44.dp)
+                                    )
+
+                                    Spacer(modifier = Modifier.width(6.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = stop.stopName,
+                                            fontSize = 14.sp,
+                                            fontWeight = if (stop.isCurrentOrNext) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (stop.isVisited) Color(0xFF94A3B8) else Color(0xFF0F172A)
+                                        )
+                                        Text(
+                                            text = stop.zone,
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF64748B)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Tlačítko pro vyfiltrování pouze této linky (s odsazením nad spodní navigační lištou)
+                        Button(
+                            onClick = {
+                                onRouteFilterChanged(vehicle.routeShortName)
+                                selectedVehicle = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF281147)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 92.dp)
+                        ) {
+                            Text(
+                                text = "Filtrovat jen linku ${vehicle.routeShortName} na mapě",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    } else {
+                        // V kompaktní poloze zobrazíme pouze info o autobusu a aktuální zpoždění (s rezervou nad spodní lištou)
+                        Spacer(modifier = Modifier.height(88.dp))
                     }
                 }
             }

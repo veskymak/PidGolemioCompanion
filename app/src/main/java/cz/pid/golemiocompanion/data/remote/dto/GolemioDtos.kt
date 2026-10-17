@@ -86,7 +86,8 @@ data class LastPositionDto(
     @SerializedName("speed") val speed: Float? = 0f,
     @SerializedName("delay") val delay: VehicleDelayDto? = null,
     @SerializedName("origin_timestamp") val originTimestamp: String? = null,
-    @SerializedName("state_position") val statePosition: String? = null
+    @SerializedName("state_position") val statePosition: String? = null,
+    @SerializedName("tracking") val tracking: Boolean? = null
 )
 
 data class VehicleDelayDto(

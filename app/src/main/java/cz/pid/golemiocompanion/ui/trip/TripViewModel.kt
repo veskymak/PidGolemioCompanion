@@ -39,7 +39,10 @@ data class TripUiState(
     val liveVehicles: List<LiveVehiclePosition> = emptyList(),
     val parkingLots: List<ParkingLotInfo> = emptyList(),
     val sharedBikes: List<SharedBikeInfo> = emptyList(),
-    val mapRouteFilter: String = ""
+    val mapRouteFilter: String = "",
+    val mapCenterLat: Double? = null,
+    val mapCenterLon: Double? = null,
+    val mapZoomLevel: Double = 14.0
 )
 
 class TripViewModel(
@@ -107,8 +110,10 @@ class TripViewModel(
 
     fun toggleTrackDeparture(departure: DepartureInfo) {
         triggeredAlertThresholds.clear()
+        val isStopping = _uiState.value.trackedDeparture?.id == departure.id
+        val next = if (isStopping) null else departure
+
         _uiState.update { state ->
-            val next = if (state.trackedDeparture?.id == departure.id) null else departure
             val telemetry = if (next != null) {
                 val matching = VehicleTelemetryHelper.findMatchingLiveVehicle(
                     departure = next,
@@ -125,6 +130,31 @@ class TripViewModel(
             } else null
             state.copy(trackedDeparture = next, trackedVehicleTelemetry = telemetry)
         }
+
+        // Okamžitě dotáhnout živá vozidla konkrétní sledované linky pro 100% přesnou shodu tripId
+        if (next != null) {
+            viewModelScope.launch {
+                repository.getLiveVehicles(next.routeShortName).onSuccess { routeVehicles ->
+                    _uiState.update { state ->
+                        val currentTracked = state.trackedDeparture ?: return@update state
+                        val mergedVehicles = (routeVehicles + state.liveVehicles).distinctBy { it.id }
+                        val matching = VehicleTelemetryHelper.findMatchingLiveVehicle(
+                            departure = currentTracked,
+                            targetStop = state.selectedStop,
+                            liveVehicles = mergedVehicles
+                        )
+                        val telemetry = matching?.let { veh ->
+                            VehicleTelemetryHelper.calculateVehicleTelemetry(
+                                vehicle = veh,
+                                stop = state.selectedStop,
+                                scheduledDepartureEpochMillis = currentTracked.exactDepartureEpochMillis
+                            )
+                        }
+                        state.copy(liveVehicles = mergedVehicles, trackedVehicleTelemetry = telemetry)
+                    }
+                }
+            }
+        }
     }
 
     fun clearTrackedDeparture() {
@@ -135,6 +165,16 @@ class TripViewModel(
     fun setMapRouteFilter(routeFilter: String) {
         _uiState.update { it.copy(mapRouteFilter = routeFilter) }
         refreshLiveVehiclesNow()
+    }
+
+    fun saveMapPosition(lat: Double, lon: Double, zoom: Double) {
+        _uiState.update {
+            it.copy(
+                mapCenterLat = lat,
+                mapCenterLon = lon,
+                mapZoomLevel = zoom
+            )
+        }
     }
 
     /**
@@ -263,13 +303,13 @@ class TripViewModel(
                     _uiState.update { state ->
                         val updatedTracked = state.trackedDeparture?.let { tracked ->
                             fresh.firstOrNull {
-                                it.routeShortName == tracked.routeShortName &&
-                                    it.scheduledEpochMillis == tracked.scheduledEpochMillis
+                                (it.tripId != null && it.tripId == tracked.tripId) ||
+                                    (it.routeShortName == tracked.routeShortName &&
+                                        it.scheduledEpochMillis == tracked.scheduledEpochMillis)
                             } ?: tracked.takeIf {
                                 val telem = state.trackedVehicleTelemetry
-                                val isLabDistanceEta = labSettings.value.enableDistanceBasedEta
-                                if (isLabDistanceEta && telem != null) {
-                                    !telem.hasDeparted
+                                if (telem != null && telem.isAtStop) {
+                                    true
                                 } else {
                                     it.exactDepartureEpochMillis >= now
                                 }
@@ -313,13 +353,23 @@ class TripViewModel(
     fun refreshLiveVehiclesNow() {
         viewModelScope.launch {
             val filter = _uiState.value.mapRouteFilter
-            repository.getLiveVehicles(filter).onSuccess { vehicles ->
+            val trackedRoute = _uiState.value.trackedDeparture?.routeShortName
+
+            val mainVehicles = repository.getLiveVehicles(filter).getOrNull().orEmpty()
+            val trackedVehicles = if (!trackedRoute.isNullOrBlank() && !trackedRoute.equals(filter.trim(), ignoreCase = true)) {
+                repository.getLiveVehicles(trackedRoute).getOrNull().orEmpty()
+            } else {
+                emptyList()
+            }
+
+            if (mainVehicles.isNotEmpty() || trackedVehicles.isNotEmpty()) {
+                val mergedVehicles = (trackedVehicles + mainVehicles).distinctBy { it.id }
                 _uiState.update { state ->
                     val updatedTelemetry = state.trackedDeparture?.let { dep ->
                         val matching = VehicleTelemetryHelper.findMatchingLiveVehicle(
                             departure = dep,
                             targetStop = state.selectedStop,
-                            liveVehicles = vehicles
+                            liveVehicles = mergedVehicles
                         )
                         matching?.let { veh ->
                             VehicleTelemetryHelper.calculateVehicleTelemetry(
@@ -329,9 +379,10 @@ class TripViewModel(
                             )
                         }
                     }
-                    state.copy(liveVehicles = vehicles, trackedVehicleTelemetry = updatedTelemetry)
+                    state.copy(liveVehicles = mergedVehicles, trackedVehicleTelemetry = updatedTelemetry)
                 }
             }
+
             repository.getParkingLots().onSuccess { lots ->
                 _uiState.update { it.copy(parkingLots = lots) }
             }
@@ -354,7 +405,7 @@ class TripViewModel(
     /**
      * Každou sekundu odfiltruje spoje, které právě odjely,
      * aby na obrazovce nikdy nezůstávaly staré spoje s nápisem "< 1 min".
-     * Pokud je aktivní matematické sledování vozidla, odpočet nezmizí, dokud vůz neopustí zastávku.
+     * Pokud je sledovaný vůz přímo v zastávce, odpočet zůstane aktivní, dokud zastávku neopustí.
      */
     private fun startOneSecondCleanupAndAlertsTicker() {
         viewModelScope.launch {
@@ -365,10 +416,9 @@ class TripViewModel(
                         it.exactDepartureEpochMillis >= now - 5_000L
                     }
                     val telem = state.trackedVehicleTelemetry
-                    val isLabDistanceEta = labSettings.value.enableDistanceBasedEta
                     val activeTracked = state.trackedDeparture?.takeIf { dep ->
-                        if (isLabDistanceEta && telem != null) {
-                            !telem.hasDeparted
+                        if (telem != null && telem.isAtStop) {
+                            true
                         } else {
                             dep.exactDepartureEpochMillis >= now - 2_000L
                         }

@@ -174,7 +174,7 @@ class GolemioRepositoryImpl(
                 apiKey = apiKey,
                 limit = 5000,
                 routeShortName = cleanFilter,
-                includeNotTracking = true
+                includeNotTracking = false
             )
 
             response.features.orEmpty().mapNotNull { feature ->
@@ -192,6 +192,19 @@ class GolemioRepositoryImpl(
                     return@mapNotNull null
                 }
 
+                val statePos = lastPos?.statePosition
+                if (lastPos?.tracking == false || statePos in listOf(
+                        "after_track",
+                        "after_track_delayed",
+                        "before_track",
+                        "before_track_delayed",
+                        "canceled",
+                        "inactive"
+                    )
+                ) {
+                    return@mapNotNull null
+                }
+
                 val vehicleTypeId = feature.properties?.trip?.vehicleType?.id ?: gtfs.routeType
                 val delaySec = lastPos?.delay?.actual ?: 0
 
@@ -206,7 +219,7 @@ class GolemioRepositoryImpl(
                     speedKmh = (lastPos?.speed ?: 0f).toInt(),
                     vehicleType = mapRouteType(vehicleTypeId, routeName),
                     originTimestamp = lastPos?.originTimestamp,
-                    isInactive = lastPos?.statePosition == "inactive" || lastPos?.originTimestamp == null
+                    isInactive = lastPos?.originTimestamp == null
                 )
             }
         }

@@ -1,7 +1,7 @@
 package cz.pid.golemiocompanion.domain.model
 
 import java.time.OffsetDateTime
-import kotlin.math.roundToInt
+import kotlin.math.abs
 
 data class VehicleTrackingTelemetry(
     val vehicle: LiveVehiclePosition,
@@ -13,9 +13,7 @@ data class VehicleTrackingTelemetry(
     val hasDeparted: Boolean,
     val estimatedArrivalSeconds: Int,
     val calculatedDepartureEpochMillis: Long,
-    val formattedStatus: String,
-    val isGpsCorrectionActive: Boolean = false,
-    val correctionSeconds: Int = 0
+    val formattedStatus: String
 )
 
 object VehicleTelemetryHelper {
@@ -25,30 +23,44 @@ object VehicleTelemetryHelper {
         targetStop: PidStop,
         liveVehicles: List<LiveVehiclePosition>
     ): LiveVehiclePosition? {
-        if (liveVehicles.isEmpty()) return null
+        val activeVehicles = liveVehicles.filter { !it.isInactive }
+        if (activeVehicles.isEmpty()) return null
 
-        // 1. Zkusit přesnou shodu tripId
-        if (!departure.tripId.isNullOrBlank()) {
-            val exactTrip = liveVehicles.firstOrNull { it.id == departure.tripId }
+        // 1. Pokud odjezd obsahuje GTFS tripId (standard v Golemio departureboards),
+        // spárujeme VÝHRADNĚ tento konkrétní spoj (tripId), aby se nikdy nezobrazovala
+        // vzdálenost jiného autobusu na stejné lince!
+        val targetTripId = departure.tripId?.trim()
+        if (!targetTripId.isNullOrBlank()) {
+            val exactTrip = activeVehicles.firstOrNull {
+                it.id.equals(targetTripId, ignoreCase = true)
+            }
             if (exactTrip != null) return exactTrip
+
+            // Záložní shoda pouze pro případ, že některý vůz z API nemá vyplněné GTFS trip_id
+            val untaggedCandidates = activeVehicles.filter { veh ->
+                veh.id == "${veh.routeShortName}_${veh.latitude}_${veh.longitude}" &&
+                    veh.routeShortName.equals(departure.routeShortName, ignoreCase = true) &&
+                    (veh.headsign.contains(departure.headsign, ignoreCase = true) ||
+                        departure.headsign.contains(veh.headsign, ignoreCase = true)) &&
+                    abs(veh.delaySeconds - departure.delaySeconds) <= 90
+            }
+            return untaggedCandidates.minByOrNull { veh ->
+                PidStopDirectory.calculateDistanceMeters(
+                    veh.latitude, veh.longitude,
+                    targetStop.latitude, targetStop.longitude
+                )
+            }
         }
 
-        // 2. Filtrovat dle čísla linky (např. "714", "715", "345")
-        val lineMatches = liveVehicles.filter {
-            it.routeShortName.equals(departure.routeShortName, ignoreCase = true)
+        // 2. Pouze pokud odjezd nemá žádné tripId: filtrovat dle čísla linky, směru a podobného zpoždění
+        val lineAndDirMatches = activeVehicles.filter { veh ->
+            veh.routeShortName.equals(departure.routeShortName, ignoreCase = true) &&
+                (veh.headsign.contains(departure.headsign, ignoreCase = true) ||
+                    departure.headsign.contains(veh.headsign, ignoreCase = true)) &&
+                abs(veh.delaySeconds - departure.delaySeconds) <= 120
         }
-        if (lineMatches.isEmpty()) return null
-        if (lineMatches.size == 1) return lineMatches.first()
 
-        // 3. Filtrovat dle směru / headsign
-        val headsignMatches = lineMatches.filter {
-            it.headsign.contains(departure.headsign, ignoreCase = true) ||
-                departure.headsign.contains(it.headsign, ignoreCase = true)
-        }
-        val candidatePool = if (headsignMatches.isNotEmpty()) headsignMatches else lineMatches
-
-        // 4. Vybrat vůz, který je nejblíže sledované zastávce
-        return candidatePool.minByOrNull { veh ->
+        return lineAndDirMatches.minByOrNull { veh ->
             PidStopDirectory.calculateDistanceMeters(
                 veh.latitude, veh.longitude,
                 targetStop.latitude, targetStop.longitude
@@ -66,7 +78,7 @@ object VehicleTelemetryHelper {
         val dLat = stopLat - vehLat
         val dLon = (stopLon - vehLon) * kotlin.math.cos(Math.toRadians((vehLat + stopLat) / 2.0))
         val bearingToStop = (Math.toDegrees(kotlin.math.atan2(dLon, dLat)) + 360.0) % 360.0
-        val angleDiff = kotlin.math.abs(bearing - bearingToStop)
+        val angleDiff = abs(bearing - bearingToStop)
         val normalizedDiff = if (angleDiff > 180.0) 360.0 - angleDiff else angleDiff
         return normalizedDiff < 100.0
     }
@@ -96,76 +108,32 @@ object VehicleTelemetryHelper {
         // Vůz je v zastávce, pokud je do 65 metrů od sloupku
         val isAtStop = distanceMeters <= 65
 
-        // Efektivní rychlost přibližování (zohledňuje zpomalování před zastávkou, křižovatky a manévry)
-        val effectiveSpeedMps = when {
-            speed > 12 -> ((speed / 3.6) * 0.75 + 7.0 * 0.25).coerceIn(5.5, 13.8) // 20 až 50 km/h
-            else -> 7.0 // ~25 km/h výchozí městský/regionální průměr pro popojíždění
-        }
-
-        // 1. Oficiální základ z PID (JŘ + nahlášené zpoždění Golemio)
-        // Pokud je oficiální čas již v minulosti, ale vůz ještě nedorazil, jako základ bereme nowMillis.
-        val officialBaseEpochMillis = if (scheduledDepartureEpochMillis < nowMillis) {
-            nowMillis
+        // Oficiální čas odjezdu z PID (JŘ + nahlášené zpoždění Golemio).
+        // Pokud je vůz přímo v zastávce, držíme odpočet aktivní během odbavování.
+        val finalDepartureEpochMillis = if (isAtStop) {
+            kotlin.math.max(nowMillis + 15_000L, scheduledDepartureEpochMillis)
         } else {
             scheduledDepartureEpochMillis
         }
 
-        // 2. Fyzikální model dojezdu (reálná vzdálenost z GPS na mapě a efektivní rychlost)
-        val travelSeconds = if (isAtStop) 0 else (distanceMeters / effectiveSpeedMps).roundToInt()
-        val dwellSeconds = if (isAtStop) 15 else 20
-        val physicalEstimatedArrivalSeconds = travelSeconds + dwellSeconds
-        val physicalEpochMillis = nowMillis + (physicalEstimatedArrivalSeconds * 1000L)
-
-        // 3. Pravidlo:
-        // - Matematický odhad dojezdu se aktivuje POUZE, pokud je vůz méně než 700 metrů od zastávky.
-        // - Maximální čas, který může do odpočtu přidat nebo odebrat, je ±30 sekund oproti oficiálním předpokladům PID.
-        // - Pokud je vůz v zastávce (isAtStop), odpočet držíme živý pro odbavování.
-        val (finalDepartureEpochMillis, isGpsCorrectionActive, correctionSeconds) = when {
-            isAtStop -> {
-                Triple(kotlin.math.max(nowMillis + 15_000L, officialBaseEpochMillis), true, 0)
-            }
-            distanceMeters < 700 -> {
-                val diffSeconds = ((physicalEpochMillis - officialBaseEpochMillis) / 1000L).toInt()
-                val clampedCorrectionSec = diffSeconds.coerceIn(-30, 30)
-                val adjustedEpoch = officialBaseEpochMillis + (clampedCorrectionSec * 1000L)
-                Triple(adjustedEpoch, true, clampedCorrectionSec)
-            }
-            else -> {
-                // 700 m a více: zachováváme 100% oficiální předpoklad PID bez GPS korekce
-                Triple(officialBaseEpochMillis, false, 0)
-            }
-        }
-
         val estimatedArrivalSeconds = ((finalDepartureEpochMillis - nowMillis) / 1000L).coerceAtLeast(0L).toInt()
 
-        // Zjistíme, zda vůz směřuje k zastávce nebo se od ní vzdaluje
         val headingTowardsStop = isHeadingTowardsStop(
             vehicle.latitude, vehicle.longitude, vehicle.bearing,
             stop.latitude, stop.longitude
         )
 
-        // Odpočet nesmí zmizet, dokud vůz neopustí zastávku:
-        // hasDeparted je true pouze tehdy, když vůz není v zastávce A (vzdaluje se od zastávky po plánovaném čase, nebo je daleko v minulosti)
         val hasDeparted = when {
             isAtStop -> false
-            // Pokud jede pryč od zastávky a čas odjezdu již uplynul nebo je dál než 120m
             !headingTowardsStop && distanceMeters > 120 && (nowMillis >= scheduledDepartureEpochMillis - 10_000L) -> true
-            // Pokud je víc než 3 minuty po čase a vůz je daleko
             nowMillis > scheduledDepartureEpochMillis + 180_000L && distanceMeters > 250 -> true
             else -> false
         }
 
         val formattedStatus = when {
             isAtStop -> "🟢 Vůz právě v zastávce (odbavování)"
-            distanceMeters < 700 -> {
-                val corrLabel = when {
-                    correctionSeconds > 0 -> "+${correctionSeconds}s"
-                    correctionSeconds < 0 -> "${correctionSeconds}s"
-                    else -> "v souladu s PID"
-                }
-                "🟡 Vůz přijíždí (${distanceMeters} m • GPS $corrLabel)"
-            }
-            else -> "🔵 Vůz se blíží (${distanceMeters} m • dle PID)"
+            distanceMeters < 700 -> "🟡 Vůz přijíždí k zastávce (${distanceMeters} m)"
+            else -> "🔵 Vůz na trase (${distanceMeters} m od zastávky)"
         }
 
         return VehicleTrackingTelemetry(
@@ -178,9 +146,8 @@ object VehicleTelemetryHelper {
             hasDeparted = hasDeparted,
             estimatedArrivalSeconds = estimatedArrivalSeconds,
             calculatedDepartureEpochMillis = finalDepartureEpochMillis,
-            formattedStatus = formattedStatus,
-            isGpsCorrectionActive = isGpsCorrectionActive,
-            correctionSeconds = correctionSeconds
+            formattedStatus = formattedStatus
         )
     }
 }
+

@@ -121,7 +121,6 @@ class MainActivity : ComponentActivity() {
                     ActiveCountdownBanner(
                         departure = uiState.trackedDeparture!!,
                         telemetry = uiState.trackedVehicleTelemetry,
-                        isLabDistanceEta = labSettings.enableDistanceBasedEta,
                         isPipMode = true,
                         onStopTracking = { tripViewModel.clearTrackedDeparture() }
                     )
@@ -171,6 +170,7 @@ class MainActivity : ComponentActivity() {
                                             forceSelectNearest = false
                                         )
                                     },
+                                    onSaveMapPosition = tripViewModel::saveMapPosition,
                                     onTrackVehicle = { line, dest, targetMillis ->
                                         val intent = Intent(this@MainActivity, DepartureTrackerService::class.java).apply {
                                             action = DepartureTrackerService.ACTION_START

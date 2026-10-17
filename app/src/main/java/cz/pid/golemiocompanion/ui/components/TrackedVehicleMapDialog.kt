@@ -47,17 +47,43 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.max
 import kotlin.math.min
 
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
+import cz.pid.golemiocompanion.ui.map.RoadRouteHelper
+import kotlin.math.roundToInt
+
 @Composable
 fun TrackedVehicleMapDialog(
     departure: DepartureInfo,
     stop: PidStop,
     telemetry: VehicleTrackingTelemetry?,
     cartoApiKey: String,
-    isLabDistanceEta: Boolean,
     onDismissRequest: () -> Unit
 ) {
     val context = LocalContext.current
     var mapViewInstance by remember { mutableStateOf<MapView?>(null) }
+    var roadRoutePoints by remember { mutableStateOf<List<GeoPoint>>(emptyList()) }
+    var dragOffsetPx by remember { mutableFloatStateOf(0f) }
+
+    val veh = telemetry?.vehicle
+    LaunchedEffect(veh?.latitude, veh?.longitude, stop.latitude, stop.longitude) {
+        if (veh != null) {
+            val waypoints = listOf(
+                GeoPoint(veh.latitude, veh.longitude),
+                GeoPoint(stop.latitude, stop.longitude)
+            )
+            RoadRouteHelper.getCachedRoute(waypoints)?.let { cached ->
+                roadRoutePoints = cached
+                mapViewInstance?.invalidate()
+            }
+            val fetched = RoadRouteHelper.fetchRoadRoute(waypoints)
+            roadRoutePoints = fetched
+            mapViewInstance?.invalidate()
+        } else {
+            roadRoutePoints = emptyList()
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismissRequest,
@@ -74,6 +100,7 @@ fun TrackedVehicleMapDialog(
             // Plovoucí okno v dolní části displeje – maximálně 50 % výšky obrazovky
             Column(
                 modifier = Modifier
+                    .offset { IntOffset(0, dragOffsetPx.coerceAtLeast(0f).roundToInt()) }
                     .fillMaxWidth()
                     .fillMaxHeight(0.50f)
                     .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
@@ -81,78 +108,100 @@ fun TrackedVehicleMapDialog(
                     .clickable(enabled = false, onClick = {}) // Zamezí zavření při kliknutí dovnitř
                     .navigationBarsPadding()
             ) {
-                // Lišta s táhlem pro přehlednost
-                Box(
+                // Horní sekce s táhlem a hlavičkou (podpora potažení dolů pro zavření)
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 8.dp, bottom = 4.dp),
-                    contentAlignment = Alignment.Center
+                        .pointerInput(Unit) {
+                            detectVerticalDragGestures(
+                                onDragEnd = {
+                                    if (dragOffsetPx > 60.dp.toPx()) {
+                                        onDismissRequest()
+                                    } else {
+                                        dragOffsetPx = 0f
+                                    }
+                                },
+                                onDragCancel = { dragOffsetPx = 0f },
+                                onVerticalDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragOffsetPx = (dragOffsetPx + dragAmount).coerceAtLeast(0f)
+                                }
+                            )
+                        }
                 ) {
+                    // Lišta s táhlem pro přehlednost
                     Box(
                         modifier = Modifier
-                            .width(36.dp)
-                            .height(4.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF475569))
-                    )
-                }
-
-                // Kompaktní hlavička okna
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.weight(1f)
+                            .fillMaxWidth()
+                            .padding(top = 8.dp, bottom = 4.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Surface(
-                            color = Color(0xFF0284C7),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(
-                                text = departure.routeShortName,
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                            )
-                        }
-
-                        Column {
-                            Text(
-                                text = "Linka ${departure.routeShortName} → ${departure.headsign}",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "Zastávka: ${stop.displayName}",
-                                color = Color(0xFF94A3B8),
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                        Box(
+                            modifier = Modifier
+                                .width(36.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF475569))
+                        )
                     }
 
-                    IconButton(
-                        onClick = onDismissRequest,
-                        modifier = Modifier.size(32.dp),
-                        colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0xFF334155))
+                    // Kompaktní hlavička okna
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Zavřít",
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Surface(
+                                color = Color(0xFF0284C7),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = departure.routeShortName,
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+
+                            Column {
+                                Text(
+                                    text = "Linka ${departure.routeShortName} → ${departure.headsign}",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Zastávka: ${stop.displayName}",
+                                    color = Color(0xFF94A3B8),
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = onDismissRequest,
+                            modifier = Modifier.size(32.dp),
+                            colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0xFF334155))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Zavřít",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
 
@@ -196,6 +245,43 @@ fun TrackedVehicleMapDialog(
                             mapView.overlays.clear()
 
                             val stopGeo = GeoPoint(stop.latitude, stop.longitude)
+                            val currentVeh = telemetry?.vehicle
+                            if (currentVeh != null) {
+                                val vehGeo = GeoPoint(currentVeh.latitude, currentVeh.longitude)
+
+                                // Silniční spojnice mezi vozem a zastávkou (kopíruje reálné silnice)
+                                val connectingLine = Polyline().apply {
+                                    outlinePaint.color = AndroidColor.parseColor("#0284C7")
+                                    outlinePaint.strokeWidth = 8f
+                                    outlinePaint.strokeCap = Paint.Cap.ROUND
+                                    outlinePaint.strokeJoin = Paint.Join.ROUND
+                                    outlinePaint.style = Paint.Style.STROKE
+                                    val pts = if (roadRoutePoints.size >= 2) {
+                                        roadRoutePoints
+                                    } else {
+                                        listOf(vehGeo, stopGeo)
+                                    }
+                                    setPoints(pts)
+                                }
+                                mapView.overlays.add(connectingLine)
+
+                                val vehMarker = Marker(mapView).apply {
+                                    position = vehGeo
+                                    title = "Vůz linky ${departure.routeShortName}"
+                                    snippet = "Rychlost: ${currentVeh.speedKmh} km/h • Zpoždění: ${currentVeh.delaySeconds} s"
+                                    icon = createLitackaVehicleDrawable(
+                                        context = context,
+                                        routeShortName = departure.routeShortName,
+                                        bearing = currentVeh.bearing,
+                                        delaySeconds = currentVeh.delaySeconds,
+                                        vehicleType = departure.vehicleType,
+                                        showExtendedDelay = true
+                                    )
+                                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                                }
+                                mapView.overlays.add(vehMarker)
+                            }
+
                             val stopMarker = Marker(mapView).apply {
                                 position = stopGeo
                                 title = "Zastávka: ${stop.displayName}"
@@ -204,37 +290,6 @@ fun TrackedVehicleMapDialog(
                                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                             }
                             mapView.overlays.add(stopMarker)
-
-                            val veh = telemetry?.vehicle
-                            if (veh != null) {
-                                val vehGeo = GeoPoint(veh.latitude, veh.longitude)
-                                val vehMarker = Marker(mapView).apply {
-                                    position = vehGeo
-                                    title = "Vůz linky ${departure.routeShortName}"
-                                    snippet = "Rychlost: ${veh.speedKmh} km/h • Zpoždění: ${veh.delaySeconds} s"
-                                    icon = createLitackaVehicleDrawable(
-                                        context = context,
-                                        routeShortName = departure.routeShortName,
-                                        bearing = veh.bearing,
-                                        delaySeconds = veh.delaySeconds,
-                                        vehicleType = departure.vehicleType,
-                                        showExtendedDelay = true
-                                    )
-                                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                                }
-                                mapView.overlays.add(vehMarker)
-
-                                // Spojnice mezi vozem a zastávkou
-                                val connectingLine = Polyline().apply {
-                                    outlinePaint.color = AndroidColor.parseColor("#0284C7")
-                                    outlinePaint.strokeWidth = 6f
-                                    outlinePaint.strokeCap = Paint.Cap.ROUND
-                                    outlinePaint.style = Paint.Style.STROKE
-                                    addPoint(vehGeo)
-                                    addPoint(stopGeo)
-                                }
-                                mapView.overlays.add(connectingLine)
-                            }
 
                             mapView.invalidate()
                         },

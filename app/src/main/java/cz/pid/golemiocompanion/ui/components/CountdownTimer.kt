@@ -25,7 +25,6 @@ import cz.pid.golemiocompanion.domain.model.VehicleTrackingTelemetry
 fun ActiveCountdownBanner(
     departure: DepartureInfo,
     telemetry: VehicleTrackingTelemetry? = null,
-    isLabDistanceEta: Boolean = true,
     isPipMode: Boolean = false,
     onOpenLiveMap: (() -> Unit)? = null,
     onStopTracking: () -> Unit,
@@ -40,12 +39,7 @@ fun ActiveCountdownBanner(
         }
     }
 
-    val targetDepartureEpoch = if (isLabDistanceEta && telemetry != null) {
-        telemetry.calculatedDepartureEpochMillis
-    } else {
-        departure.exactDepartureEpochMillis
-    }
-
+    val targetDepartureEpoch = departure.exactDepartureEpochMillis
     val isAtStop = telemetry?.isAtStop == true
 
     // Přesný rozdíl v sekundách
@@ -130,7 +124,7 @@ fun ActiveCountdownBanner(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (isLabDistanceEta && telemetry?.isGpsCorrectionActive == true) "AKTIVNÍ ODPOČET (🧪 GPS KOREKCE < 700 M)" else "AKTIVNÍ ODPOČET (JŘ + GOLEMIO)",
+                        text = "AKTIVNÍ ODPOČET (JŘ + GOLEMIO)",
                         color = urgencyColor,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
@@ -143,11 +137,7 @@ fun ActiveCountdownBanner(
                         fontWeight = FontWeight.Bold
                     )
                     val detailText = if (telemetry != null) {
-                        val corrPart = if (telemetry.isGpsCorrectionActive && telemetry.correctionSeconds != 0) {
-                            val sign = if (telemetry.correctionSeconds > 0) "+" else ""
-                            " • GPS ${sign}${telemetry.correctionSeconds}s"
-                        } else ""
-                        "Vzdálenost ${telemetry.distanceMeters} m • Poloha před ${telemetry.pingAgeSeconds} s • ${telemetry.speedKmh} km/h • Zpoždění ${formatDelayLabel(telemetry.delaySeconds, true)}$corrPart"
+                        "Vzdálenost ${telemetry.distanceMeters} m • Poloha před ${telemetry.pingAgeSeconds} s • ${telemetry.speedKmh} km/h • Zpoždění ${formatDelayLabel(telemetry.delaySeconds, true)}"
                     } else {
                         "JŘ ${departure.scheduledTimeFormatted} • Zpoždění ${formatDelayLabel(departure.delaySeconds, departure.isDelayAvailable)} • Odjezd v ${departure.exactDepartureTimeFormatted}"
                     }

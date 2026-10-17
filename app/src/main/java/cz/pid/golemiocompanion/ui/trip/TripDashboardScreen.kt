@@ -287,7 +287,6 @@ fun TripDashboardScreen(
             ActiveCountdownBanner(
                 departure = tracked,
                 telemetry = uiState.trackedVehicleTelemetry,
-                isLabDistanceEta = labSettings.enableDistanceBasedEta,
                 isPipMode = false,
                 onOpenLiveMap = { showTrackedVehicleMap = true },
                 onStopTracking = onClearTrackedDeparture
@@ -302,7 +301,6 @@ fun TripDashboardScreen(
                 stop = uiState.selectedStop,
                 telemetry = uiState.trackedVehicleTelemetry,
                 cartoApiKey = labSettings.cartoApiKey,
-                isLabDistanceEta = labSettings.enableDistanceBasedEta,
                 onDismissRequest = { showTrackedVehicleMap = false }
             )
         }
