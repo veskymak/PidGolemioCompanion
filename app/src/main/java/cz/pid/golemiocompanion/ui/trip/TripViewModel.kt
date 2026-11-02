@@ -57,13 +57,13 @@ class TripViewModel(
 
     private var departuresPollingJob: Job? = null
     private var mapPollingJob: Job? = null
+    private var isMapTabActive = false
     private var hasAutoSelectedNearestStop = false
     private val triggeredAlertThresholds = mutableSetOf<String>()
 
     init {
         startDeparturesPolling()
         startOneSecondCleanupAndAlertsTicker()
-        startLiveMapPolling()
 
         viewModelScope.launch {
             labPreferencesRepository.settings
@@ -72,7 +72,9 @@ class TripViewModel(
                 .drop(1)
                 .collect {
                     refreshDeparturesNow()
-                    refreshLiveVehiclesNow()
+                    if (isMapTabActive || _uiState.value.trackedDeparture != null) {
+                        refreshLiveVehiclesNow()
+                    }
                 }
         }
     }
@@ -131,8 +133,10 @@ class TripViewModel(
             state.copy(trackedDeparture = next, trackedVehicleTelemetry = telemetry)
         }
 
-        // Okamžitě dotáhnout živá vozidla konkrétní sledované linky pro 100% přesnou shodu tripId
         if (next != null) {
+            if (!isMapTabActive && mapPollingJob == null) {
+                startLiveMapPolling()
+            }
             viewModelScope.launch {
                 repository.getLiveVehicles(next.routeShortName).onSuccess { routeVehicles ->
                     _uiState.update { state ->
@@ -154,12 +158,21 @@ class TripViewModel(
                     }
                 }
             }
+        } else {
+            if (!isMapTabActive) {
+                mapPollingJob?.cancel()
+                mapPollingJob = null
+            }
         }
     }
 
     fun clearTrackedDeparture() {
         triggeredAlertThresholds.clear()
         _uiState.update { it.copy(trackedDeparture = null, trackedVehicleTelemetry = null) }
+        if (!isMapTabActive) {
+            mapPollingJob?.cancel()
+            mapPollingJob = null
+        }
     }
 
     fun setMapRouteFilter(routeFilter: String) {
@@ -355,8 +368,14 @@ class TripViewModel(
             val filter = _uiState.value.mapRouteFilter
             val trackedRoute = _uiState.value.trackedDeparture?.routeShortName
 
-            val mainVehicles = repository.getLiveVehicles(filter).getOrNull().orEmpty()
-            val trackedVehicles = if (!trackedRoute.isNullOrBlank() && !trackedRoute.equals(filter.trim(), ignoreCase = true)) {
+            // Pokud nejsme na mapě a pouze sledujeme konkrétní spoj, stahujeme POUZE vozidla dané linky!
+            val mainVehicles = if (isMapTabActive) {
+                repository.getLiveVehicles(filter).getOrNull().orEmpty()
+            } else {
+                emptyList()
+            }
+
+            val trackedVehicles = if (!trackedRoute.isNullOrBlank() && (mainVehicles.isEmpty() || !trackedRoute.equals(filter.trim(), ignoreCase = true))) {
                 repository.getLiveVehicles(trackedRoute).getOrNull().orEmpty()
             } else {
                 emptyList()
@@ -383,11 +402,14 @@ class TripViewModel(
                 }
             }
 
-            repository.getParkingLots().onSuccess { lots ->
-                _uiState.update { it.copy(parkingLots = lots) }
-            }
-            repository.getSharedBikes().onSuccess { bikes ->
-                _uiState.update { it.copy(sharedBikes = bikes) }
+            // Parkoviště a sdílená kola stahovat POUZE pokud je uživatel aktivně na záložce Živá Mapa
+            if (isMapTabActive) {
+                repository.getParkingLots().onSuccess { lots ->
+                    _uiState.update { it.copy(parkingLots = lots) }
+                }
+                repository.getSharedBikes().onSuccess { bikes ->
+                    _uiState.update { it.copy(sharedBikes = bikes) }
+                }
             }
         }
     }
@@ -435,12 +457,26 @@ class TripViewModel(
         }
     }
 
+    fun setMapTabActive(isActive: Boolean) {
+        if (isMapTabActive == isActive) return
+        isMapTabActive = isActive
+        if (isActive) {
+            startLiveMapPolling()
+        } else {
+            // Pokud není aktivně sledovaný spoj s telemetrií, zastavit polling mapy
+            if (_uiState.value.trackedDeparture == null) {
+                mapPollingJob?.cancel()
+                mapPollingJob = null
+            }
+        }
+    }
+
     private fun startLiveMapPolling() {
         mapPollingJob?.cancel()
         mapPollingJob = viewModelScope.launch {
             while (true) {
                 refreshLiveVehiclesNow()
-                delay(10_000L)
+                delay(12_000L)
             }
         }
     }

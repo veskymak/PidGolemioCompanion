@@ -67,7 +67,8 @@ class MainActivity : ComponentActivity() {
         labPreferencesRepository = LabPreferencesRepository(applicationContext)
         tripViewModel = TripViewModel(
             repository = GolemioRepositoryImpl(
-                apiKeyProvider = { labPreferencesRepository.settings.value.golemioApiKey }
+                apiKeyProvider = { labPreferencesRepository.settings.value.golemioApiKey },
+                context = applicationContext
             ),
             labPreferencesRepository = labPreferencesRepository
         )
@@ -77,6 +78,10 @@ class MainActivity : ComponentActivity() {
                 val uiState by tripViewModel.uiState.collectAsState()
                 val labSettings by tripViewModel.labSettings.collectAsState()
                 var currentTab by remember { mutableStateOf(AppTab.DEPARTURES) }
+
+                LaunchedEffect(currentTab) {
+                    tripViewModel.setMapTabActive(currentTab == AppTab.LIVE_MAP)
+                }
 
                 // Automatické vyžádání polohy při startu aplikace a doporučení nejbližších zastávek
                 val locationPermissionLauncher = rememberLauncherForActivityResult(

@@ -1,12 +1,15 @@
 package cz.pid.golemiocompanion.ui.map
 
+import android.content.Context
 import android.util.LruCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Cache
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import org.osmdroid.util.GeoPoint
+import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
@@ -16,12 +19,24 @@ import java.util.concurrent.TimeUnit
  */
 object RoadRouteHelper {
 
-    private val client: OkHttpClient by lazy {
-        OkHttpClient.Builder()
+    private var clientInstance: OkHttpClient? = null
+
+    fun initialize(context: Context) {
+        if (clientInstance == null) {
+            val httpCacheDir = File(context.cacheDir, "osrm_cache")
+            clientInstance = OkHttpClient.Builder()
+                .connectTimeout(6, TimeUnit.SECONDS)
+                .readTimeout(6, TimeUnit.SECONDS)
+                .cache(Cache(httpCacheDir, 10L * 1024 * 1024)) // 10 MB HTTP cache pro geometrie tras
+                .build()
+        }
+    }
+
+    private val client: OkHttpClient
+        get() = clientInstance ?: OkHttpClient.Builder()
             .connectTimeout(6, TimeUnit.SECONDS)
             .readTimeout(6, TimeUnit.SECONDS)
-            .build()
-    }
+            .build().also { clientInstance = it }
 
     private val routeCache = object : LruCache<String, List<GeoPoint>>(150) {}
 

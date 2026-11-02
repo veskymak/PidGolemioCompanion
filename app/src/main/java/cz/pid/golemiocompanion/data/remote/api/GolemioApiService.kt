@@ -42,6 +42,7 @@ interface GolemioApiService {
     @GET("v3/parking")
     suspend fun getParkingLotsV3(
         @Header("X-Access-Token") apiKey: String,
+        @Header("Cache-Control") cacheControl: String = "public, max-age=180",
         @Query("primarySource") primarySource: String = "tsk-offstreet",
         @Query("limit") limit: Int = 100
     ): cz.pid.golemiocompanion.data.remote.dto.ParkingV3ResponseDto
@@ -49,6 +50,7 @@ interface GolemioApiService {
     @GET("v3/parking-measurements")
     suspend fun getParkingMeasurements(
         @Header("X-Access-Token") apiKey: String,
+        @Header("Cache-Control") cacheControl: String = "public, max-age=60",
         @Query("primarySource") primarySource: String = "tsk-offstreet",
         @Query("limit") limit: Int = 100
     ): List<cz.pid.golemiocompanion.data.remote.dto.ParkingMeasurementDto>
@@ -56,12 +58,14 @@ interface GolemioApiService {
     @GET("v2/parking")
     suspend fun getParkingLots(
         @Header("X-Access-Token") apiKey: String,
+        @Header("Cache-Control") cacheControl: String = "public, max-age=180",
         @Query("limit") limit: Int = 100
     ): ParkingLotsGeoJsonDto
 
     @GET("v2/sharedbikes")
     suspend fun getSharedBikes(
         @Header("X-Access-Token") apiKey: String,
+        @Header("Cache-Control") cacheControl: String = "public, max-age=60",
         @Query("limit") limit: Int = 150
     ): SharedBikesGeoJsonDto
 }

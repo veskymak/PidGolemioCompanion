@@ -1,5 +1,6 @@
 package cz.pid.golemiocompanion.data.repository
 
+import android.content.Context
 import cz.pid.golemiocompanion.BuildConfig
 import cz.pid.golemiocompanion.data.remote.api.GolemioApiService
 import cz.pid.golemiocompanion.domain.model.DepartureInfo
@@ -9,9 +10,11 @@ import cz.pid.golemiocompanion.domain.model.PidStop
 import cz.pid.golemiocompanion.domain.model.SharedBikeInfo
 import cz.pid.golemiocompanion.domain.model.VehicleType
 import cz.pid.golemiocompanion.domain.repository.GolemioRepository
+import okhttp3.Cache
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.io.File
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -19,7 +22,8 @@ import java.util.concurrent.TimeUnit
 
 class GolemioRepositoryImpl(
     private val apiKeyProvider: (() -> String)? = null,
-    private val customApiKey: String? = null
+    private val customApiKey: String? = null,
+    private val context: Context? = null
 ) : GolemioRepository {
 
     private val pragueZone = ZoneId.of("Europe/Prague")
@@ -33,10 +37,16 @@ class GolemioRepositoryImpl(
             ?: DEFAULT_FALLBACK_KEY
 
     private val api: GolemioApiService by lazy {
-        val client = OkHttpClient.Builder()
+        val clientBuilder = OkHttpClient.Builder()
             .connectTimeout(12, TimeUnit.SECONDS)
             .readTimeout(12, TimeUnit.SECONDS)
-            .build()
+
+        context?.cacheDir?.let { cacheDir ->
+            val httpCacheDir = File(cacheDir, "http_cache")
+            clientBuilder.cache(Cache(httpCacheDir, 25L * 1024 * 1024)) // 25 MB HTTP cache
+        }
+
+        val client = clientBuilder.build()
 
         Retrofit.Builder()
             .baseUrl("https://api.golemio.cz/")
